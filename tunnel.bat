@@ -48,6 +48,28 @@ if errorlevel 1 (
 )
 echo [OK] Бот запущен: http://127.0.0.1:8000
 
+:: Проверяем и настраиваем прокси для ngrok (обход блокировок CRL в РФ)
+set "HTTP_PROXY="
+set "http_proxy="
+netstat -ano | findstr "127.0.0.1:10809" | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    set "HTTP_PROXY=http://127.0.0.1:10809"
+    set "http_proxy=http://127.0.0.1:10809"
+    echo [OK] Прокси Happ (10809) подключен для ngrok (обход блокировок CRL)
+) else (
+    netstat -ano | findstr "127.0.0.1:7890" | findstr "LISTENING" >nul 2>&1
+    if not errorlevel 1 (
+        set "HTTP_PROXY=http://127.0.0.1:7890"
+        set "http_proxy=http://127.0.0.1:7890"
+        echo [OK] Прокси Clash (7890) подключен для ngrok (обход блокировок CRL)
+    ) else (
+        echo [ВНИМАНИЕ] Happ не обнаружен на порту 10809. Убедитесь, что Happ запущен!
+    )
+)
+
+:: Завершаем старые зависшие процессы ngrok если есть
+taskkill /f /im ngrok.exe >nul 2>&1
+
 :: Запуск ngrok туннеля
 echo.
 echo [2/2] Запуск ngrok туннеля...

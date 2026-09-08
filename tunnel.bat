@@ -78,7 +78,7 @@ echo.
 echo Пароль для входа с телефона: trader2026
 echo (сменить: .env - APP_PASSWORD=новый_пароль)
 echo.
-ngrok http 8000
+ngrok http 127.0.0.1:8000
 echo.
 echo Туннель отключён. Бот работает до закрытия окна.
 pause

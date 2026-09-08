@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход — Kronos Trading</title>
+    <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="login-card">
+            <div class="login-logo">⚡ Kronos Trading</div>
+            <h1>Вход</h1>
+
+            {% if error %}
+            <div class="login-error">Неверный пароль. Попробуйте снова.</div>
+            {% endif %}
+
+            <form method="post" action="/api/auth/login" autocomplete="off">
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input type="password"
+                           id="password"
+                           name="password"
+                           placeholder="Введите пароль"
+                           autofocus
+                           required>
+                </div>
+                <button type="submit" class="login-btn">Войти →</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

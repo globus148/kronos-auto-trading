@@ -1,0 +1,34 @@
+﻿# Environment & Secrets
+.env
+.env.local
+.env.*.local
+APP_PASSWORD*
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+env/
+venv/
+.venv/
+
+# Database & Data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Logs & Tunnels
+*.log
+cf_tunnel.log
+tunnel.log
+trading.log
+ngrok.log
+
+# Testing & IDE
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.zcode/

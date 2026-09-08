@@ -1,0 +1,113 @@
+/* Kronos Trading — страница входа */
+
+:root {
+    --bg: #121318;
+    --surface: #1b1c22;
+    --surface2: #262830;
+    --border: #353841;
+    --text: #f0f0f3;
+    --text-dim: #9ca0aa;
+    --accent: #4a9eff;
+    --accent2: #74b9ff;
+    --red: #ff6b6b;
+    --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.login-wrapper {
+    width: 100%;
+    max-width: 380px;
+}
+
+.login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 40px 32px;
+}
+
+.login-logo {
+    font-size: 1.4em;
+    font-weight: 700;
+    color: var(--accent2);
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.login-card h1 {
+    font-size: 1.5em;
+    font-weight: 600;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.login-error {
+    background: rgba(255, 107, 107, 0.12);
+    color: var(--red);
+    border: 1px solid rgba(255, 107, 107, 0.3);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 20px;
+    font-size: 0.9em;
+    text-align: center;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.85em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 1em;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.login-btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: white;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.login-btn:hover {
+    background: var(--accent2);
+}
+
+.login-btn:active {
+    transform: scale(0.98);
+}

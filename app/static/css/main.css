@@ -1,0 +1,625 @@
+/* Kronos Auto-Trading — тёмно-серая тема */
+
+:root {
+    --bg: #121318;
+    --surface: #1b1c22;
+    --surface2: #262830;
+    --border: #353841;
+    --text: #f0f0f3;
+    --text-dim: #9ca0aa;
+    --accent: #4a9eff;
+    --accent2: #74b9ff;
+    --green: #00cec9;
+    --green-bg: rgba(0, 206, 201, 0.12);
+    --red: #ff6b6b;
+    --red-bg: rgba(255, 107, 107, 0.12);
+    --yellow: #ffeaa7;
+    --yellow-bg: rgba(255, 234, 167, 0.12);
+    --blue: #74b9ff;
+    --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+/* ─── Navbar ─── */
+.navbar {
+    display: flex;
+    align-items: center;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 20px;
+}
+.logo {
+    font-size: 1.2em;
+    font-weight: 700;
+    color: var(--accent2);
+    text-decoration: none;
+}
+.nav-links { display: flex; gap: 16px; align-items: center; }
+.nav-links a {
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    transition: all 0.2s;
+}
+.nav-links a:hover, .nav-links a.active {
+    color: var(--text);
+    background: var(--surface2);
+}
+.badge {
+    background: var(--green-bg);
+    color: var(--green);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85em;
+}
+.badge-live {
+    background: var(--red-bg);
+    color: var(--red);
+}
+/* ─── Mode Switcher (Paper/Live) ─── */
+.mode-switcher {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 3px;
+}
+.mode-switcher .btn-xs {
+    font-size: 0.85em;
+    padding: 4px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+.mode-inactive {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid transparent;
+}
+.mode-inactive:hover {
+    color: var(--text);
+    border-color: var(--border);
+}
+.nav-logout {
+    color: var(--red) !important;
+    font-size: 1.2em;
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    transition: background 0.2s;
+}
+.nav-logout:hover {
+    background: var(--red-bg);
+}
+
+/* ─── Container ─── */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* ─── Cards ─── */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+}
+.card-header {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* ─── Grid ─── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+/* ─── Stats ─── */
+.stat-value { font-size: 1.8em; font-weight: 700; }
+.stat-label { font-size: 0.85em; color: var(--text-dim); margin-top: 2px; }
+.stat-value.positive { color: var(--green); }
+.stat-value.negative { color: var(--red); }
+
+/* ─── Table ─── */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+th {
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 0.85em;
+    text-transform: uppercase;
+}
+tr:hover { background: var(--surface2); }
+
+/* ─── Buttons ─── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.2s;
+    user-select: none;
+    /* HTMX: кнопки-триггеры не должны быть disabled по умолчанию */
+    pointer-events: auto;
+}
+.btn:hover { border-color: var(--accent); color: var(--text); }
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+.btn-primary:hover { background: var(--accent2); }
+.btn-success {
+    background: var(--green);
+    border-color: var(--green);
+    color: #0f1117;
+    font-weight: 600;
+}
+.btn-danger {
+    background: var(--red);
+    border-color: var(--red);
+    color: white;
+}
+.btn-sm { padding: 5px 12px; font-size: 0.85em; }
+.btn-xs { padding: 2px 6px; font-size: 0.7em; line-height: 1.1; }
+.bulk-toggle { margin-left: 6px; display: inline-flex; gap: 3px; }
+.bulk-on { background: rgba(0, 206, 201, 0.15); border-color: rgba(0, 206, 201, 0.4); color: var(--green); }
+.bulk-on:hover { background: rgba(0, 206, 201, 0.25); }
+.bulk-off { background: rgba(255, 107, 107, 0.12); border-color: rgba(255, 107, 107, 0.4); color: var(--red); }
+.bulk-off:hover { background: rgba(255, 107, 107, 0.22); }
+
+/* ─── Signal gauges ─── */
+.gauge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    background: var(--surface2);
+}
+.gauge-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    flex: 1;
+    overflow: hidden;
+}
+.gauge-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s;
+}
+
+/* ─── Coin table (dashboard) — колоночная таблица ─── */
+.coins-table {
+    display: flex;
+    flex-direction: column;
+}
+.coins-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--border);
+}
+.coins-row.coin-item:hover { background: var(--surface2); }
+.coins-head {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+    background: var(--surface);
+}
+/* Подзаголовок: «Монета · Авто · Вероятность роста · P» */
+.coins-sub {
+    font-size: 0.72em;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    padding-top: 4px;
+    padding-bottom: 6px;
+    background: var(--surface);
+}
+.coins-sub .tf-label {
+    color: var(--text-dim);
+}
+.col-coin {
+    display: flex;
+    align-items: center;
+}
+.coin-symbol {
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+}
+.coin-symbol:hover { color: var(--accent); }
+
+/* Ячейка таймфрейма: [кнопка авто] [бар вероятности] [%] */
+.col-tf {
+    display: grid;
+    grid-template-columns: 50px 1fr 42px;
+    align-items: center;
+    gap: 6px;
+}
+.coins-head .col-tf {
+    /* В шапке первый слот шире — под кнопки «Всё ON/OFF» */
+    grid-template-columns: auto 1fr 42px;
+}
+.tf-label, .tf-bar-h, .tf-pct-h {
+    color: var(--text-dim);
+}
+.tf-auto {
+    display: flex;
+    align-items: center;
+}
+.tf-bar {
+    height: 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.tf-pct {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85em;
+}
+
+/* Бар вероятности роста (заполнение) */
+.coin-prob-fill {
+    display: block;
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.4s ease, background 0.3s ease;
+    min-width: 3px;
+}
+.coin-prob-fill.up { background: linear-gradient(90deg, var(--green), #2dd4bf); }
+.coin-prob-fill.down { background: linear-gradient(90deg, var(--red), #ff8787); }
+.coin-prob-fill.idle { background: rgba(156,160,170,0.15); }
+.coin-prob-pct.up { color: var(--green); font-weight: 600; }
+.coin-prob-pct.down { color: var(--red); font-weight: 600; }
+.coin-prob-pct.idle { color: var(--text-dim); }
+
+/* HTMX: auto-toggle span не должен блокировать клики */
+.auto-toggle {
+    display: inline-block;
+    cursor: pointer;
+}
+
+/* ─── Coin page header ─── */
+.coin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.coin-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.coin-title h1 {
+    font-size: 1.3em;
+    margin: 0;
+}
+
+/* ─── TF tabs (переключатель таймфрейма) ─── */
+.tf-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border-radius: var(--radius);
+    padding: 3px;
+}
+.tf-tab {
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: all 0.2s;
+}
+.tf-tab:hover {
+    color: var(--text);
+    background: var(--border);
+}
+.tf-tab.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* ─── Live card (цена + вероятность) ─── */
+.live-card {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr;
+    gap: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    align-items: center;
+}
+.live-label {
+    font-size: 0.85em;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+}
+.price-big {
+    font-size: 2.4em;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+.prob-big {
+    font-size: 2.4em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+.live-time {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    margin-top: 4px;
+}
+
+/* ─── Sub-signals ─── */
+.subsignal-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.subsignal-item {
+    display: grid;
+    grid-template-columns: 70px 1fr 40px;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.85em;
+}
+.subsignal-name {
+    color: var(--text-dim);
+    font-family: monospace;
+}
+.subsignal-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+}
+.subsignal-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent);
+    transition: width 0.4s;
+}
+.subsignal-val {
+    color: var(--text-dim);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ─── Accuracy banner ─── */
+.accuracy-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    font-size: 0.9em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* ─── Tags ─── */
+.tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 500;
+}
+.tag-green { background: var(--green-bg); color: var(--green); }
+.tag-red { background: var(--red-bg); color: var(--red); }
+.tag-yellow { background: var(--yellow-bg); color: var(--yellow); }
+.tag-blue { background: rgba(116,185,255,0.15); color: var(--blue); }
+
+/* ─── Plotly chart ─── */
+.plotly-chart { width: 100%; height: 450px; }
+
+/* ─── Form helpers (settings) ─── */
+.form-group {
+    margin-bottom: 14px;
+}
+.form-group label {
+    display: block;
+    font-size: 0.9em;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+}
+.form-group input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.9em;
+}
+.form-group input:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+.form-hint {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    margin-top: 4px;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .container { padding: 12px; }
+    .live-card {
+        grid-template-columns: 1fr 1fr;
+    }
+    .live-right {
+        grid-column: span 2;
+    }
+}
+
+/* ─── Вероятность роста (бар внутри ячейки col-tf) ───
+   .coin-prob-fill и .coin-prob-pct определены выше (coin-table). */
+
+/* ─── Ручная торговая модалка ─── */
+.trade-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+}
+.trade-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 460px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+.trade-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+}
+.trade-modal-header h2 {
+    font-size: 1.1em;
+    margin: 0;
+}
+.trade-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.3em;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+.trade-modal-close:hover {
+    background: var(--surface2);
+    color: var(--text);
+}
+.trade-modal-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.trade-modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+}
+.side-toggle {
+    display: flex;
+    gap: 8px;
+}
+.side-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.side-btn.side-long.active {
+    border-color: var(--green);
+    color: var(--green);
+    background: var(--green-bg);
+}
+.side-btn.side-short.active {
+    border-color: var(--red);
+    color: var(--red);
+    background: var(--red-bg);
+}
+.trade-modal .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.trade-modal .form-group label {
+    font-size: 0.9em;
+    color: var(--text-dim);
+}
+.trade-modal input[type="number"],
+.trade-modal input[type="text"] {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1em;
+}
+.trade-modal input:disabled {
+    opacity: 0.7;
+}
+.trade-modal .form-hint {
+    font-size: 0.8em;
+    color: var(--text-dim);
+}
+
+/* Кнопки в списке сделок */
+.btn-xs {
+    font-size: 0.78em;
+    padding: 4px 10px;
+    border-radius: 6px;
+}

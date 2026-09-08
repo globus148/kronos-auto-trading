@@ -1,0 +1,1022 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- ─── Header ─── -->
+<div class="coin-header">
+    <div class="coin-title">
+        <h1>{{ symbol }}</h1>
+        <!-- Переключатель таймфрейма -->
+        <div class="tf-tabs">
+            <a href="/coin/{{ encoded }}?tf=1h" class="tf-tab {% if tf == '1h' %}active{% endif %}">1h</a>
+            <a href="/coin/{{ encoded }}?tf=4h" class="tf-tab {% if tf == '4h' %}active{% endif %}">4h</a>
+        </div>
+        <span id="tick-result"></span>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <span class="live-label">ТФ: <strong>{{ tf }}</strong></span>
+        <button class="btn btn-sm" hx-post="/coin/{{ encoded }}/tick?tf={{ tf }}" hx-target="#tick-result">🔄 Тик</button>
+    </div>
+</div>
+
+<!-- ─── Live карточка: цена + вероятность + суб-сигналы ─── -->
+<div class="live-card">
+    <div class="live-left">
+        <div class="live-label">Актуальная цена</div>
+        <div class="price-big" id="live-price">{{ tick_s.close|pricefmt if tick_s else "—" }}</div>
+        <div class="live-time" id="live-time">обновляется каждые 5 сек</div>
+    </div>
+    <div class="live-center">
+        <div class="live-label" id="live-prob-label">
+            {% if (tick_s.direction or 'up') == 'down' %}▼ Вероятность падения{% else %}▲ Вероятность роста{% endif %}
+        </div>
+        <div class="prob-big" id="live-prob"
+             style="{% if (tick_s.direction or 'up') == 'down' %}color: var(--red){% elif (tick_s.win_prob or 0) < 0.01 %}color: var(--text-dim){% elif (tick_s.win_prob or 0) >= 0.6 %}color: var(--green){% elif (tick_s.win_prob or 0) >= 0.4 %}color: var(--yellow){% else %}color: var(--red){% endif %}">
+            {{ "%.0f%%"|format((tick_s.win_prob or 0) * 100) if (tick_s.win_prob or 0) > 0.01 else "—" }}
+        </div>
+        <div class="live-label" style="margin-top: 4px;">
+            S_entry = <span id="live-sentry">{{ "%.3f"|format(tick_s.s_entry or 0) }}</span>
+
+        </div>
+    </div>
+    <div class="live-right">
+        <div class="live-label">Суб-сигналы</div>
+        <div class="subsignal-grid" id="live-subs">
+            {% set subs = tick_s.sub_signals or {} %}
+            {% if subs %}
+                {% for name, val in subs.items() %}
+                <div class="subsignal-item">
+                    <span class="subsignal-name">{{ name }}</span>
+                    <div class="subsignal-bar">
+                        <div class="subsignal-fill" style="width: {{ "%.0f"|format(val * 100) }}%;"></div>
+                    </div>
+                    <span class="subsignal-val">{{ val|pricefmt }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="color: var(--text-dim); font-size: 0.85em;">Загрузка сигналов...</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ─── Точность Kronos (если есть) ─── -->
+{% if accuracy_summary.total > 0 %}
+<div class="accuracy-banner">
+    <span>🎯 Точность Kronos (последние {{ accuracy_summary.total }} свечей):
+    <strong style="color: {% if accuracy_summary.pct >= 55 %}var(--green){% elif accuracy_summary.pct >= 45 %}var(--yellow){% else %}var(--red){% endif %}">
+        {{ accuracy_summary.correct }}/{{ accuracy_summary.total }} ({{ "%.0f%%"|format(accuracy_summary.pct) }})
+    </strong></span>
+    <span style="color: var(--text-dim); font-size: 0.85em;">
+        ▲ = верно угадал рост, ▼ = верно угадал падение, ✕ = ошибка
+    </span>
+</div>
+{% endif %}
+
+<div class="grid-2">
+    <!-- ─── Chart ─── -->
+    <div class="card" style="grid-column: span 2;">
+        <div id="candle-chart" class="plotly-chart" style="height: 500px;"></div>
+    </div>
+
+    <!-- ─── Signals ─── -->
+    <div class="card">
+        <div class="card-header">📈 Сигналы</div>
+        <div style="margin-bottom: 12px;">
+            <div style="font-size: 0.85em; color: var(--text-dim); margin-bottom: 4px;">S_entry</div>
+            <div class="gauge">
+                <div class="gauge-bar">
+                    <div class="gauge-fill" style="width: {{ "%.0f"|format(tick.s_entry * 100) }}%; background: {{ 'var(--green)' if tick.s_entry >= entry_threshold else 'var(--red)' }};"></div>
+                </div>
+                <strong>{{ "%.3f"|format(tick.s_entry) }}</strong>
+                {% if tick.s_entry >= entry_threshold %}<span class="tag tag-green">≥ порога</span>
+                {% else %}<span class="tag tag-red">ниже</span>{% endif %}
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 0.85em; color: var(--text-dim); margin-bottom: 4px;">Действие</div>
+            {% if tick.action == "hold" %}
+                <span class="tag tag-yellow">HOLD</span>
+                {% if tick_s.reject_reason %}
+                    <div style="margin-top:4px; font-size:0.78em; color:var(--red); max-width:280px;" title="Причина отказа входа">🚫 {{ tick_s.reject_reason }}</div>
+                {% elif not auto_enabled %}
+                    <div style="margin-top:4px; font-size:0.78em; color:var(--text-dim);">Авто-торговля выключена</div>
+                {% endif %}
+            {% elif tick.action == "opened" %}
+                <span class="tag tag-green">OPENED {{ tick.detail }}</span>
+            {% elif tick.action.startswith("closed") %}
+                <span class="tag tag-blue">CLOSED</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ─── Controls ─── -->
+    <div class="card">
+        <div class="card-header">🎮 Управление <span class="tag tag-blue">{{ tf }}</span></div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div>
+                <button type="button"
+                        class="btn {% if auto_enabled %}btn-success{% endif %}"
+                        id="auto-btn"
+                        hx-post="/coin/{{ encoded }}/auto?tf={{ tf }}"
+                        hx-target="this"
+                        hx-swap="outerHTML">
+                    Авто-торговля {{ tf }}: {% if auto_enabled %}ВКЛ{% else %}ВЫКЛ{% endif %}
+                </button>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-success" onclick="openTradeModal('long')">💰 Купить (Long)</button>
+                <button class="btn btn-danger" onclick="openTradeModal('short')">🔻 Шорт (Short)</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Открытые сделки по этой монете ─── -->
+<div class="card" style="margin-top: 16px;">
+    <div class="card-header">
+        📋 Открытые сделки ({{ open_positions|length }})
+        <span class="tag tag-blue">Баланс: ${{ "%.2f"|format(session.cash) }}</span>
+    </div>
+    {% if open_positions %}
+    <div id="positions-list">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Сторона</th>
+                <th>ТФ</th>
+                <th>Количество</th>
+                <th>Вход</th>
+                <th>Стоп</th>
+                <th>Цель</th>
+                <th>Тек. цена</th>
+                <th>PnL</th>
+                <th>Действие</th>
+            </tr>
+        </thead>
+        <tbody id="positions-tbody">
+            {% for pos in open_positions %}
+            <tr id="pos-row-{{ pos.id }}">
+                <td>#{{ pos.id }}</td>
+                <td style="{% if pos.side == 'short' %}color: var(--red){% else %}color: var(--green){% endif %}; font-weight: 600;">
+                    {{ pos.side|upper }}
+                </td>
+                <td>{{ pos.tf }}</td>
+                <td>{{ "%.6f"|format(pos.qty) }}</td>
+                <td>${{ pos.entry_price|pricefmt }}</td>
+                <td>{{ pos.stop_price|pricefmt if pos.stop_price > 0 else "—" }}</td>
+                <td>{{ pos.target_price|pricefmt if pos.target_price > 0 else "—" }}</td>
+                <td class="pos-current-price" data-entry="{{ pos.entry_price }}" data-side="{{ pos.side }}" data-qty="{{ pos.qty }}">
+                    <span class="pos-live-price">—</span>
+                </td>
+                <td class="pos-pnl">—</td>
+                <td style="white-space: nowrap;">
+                    <button type="button" class="btn btn-xs"
+                            onclick="openEditModal({{ pos.id }}, '{{ pos.side }}', {{ pos.entry_price }}, {{ pos.stop_price }}, {{ pos.target_price }})"
+                            title="Изменить стоп/тейк">✎ Изменить</button>
+                    <button type="button" class="btn btn-xs btn-danger"
+                            onclick="confirmClosePos({{ pos.id }}, '{{ symbol }}', '{{ pos.side }}', {{ pos.entry_price }}, {{ pos.qty }})"
+                            title="Закрыть сделку">✕ Закрыть</button>
+                </td>
+            </tr>
+            <tr id="pos-result-{{ pos.id }}" style="display:none;"></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim);">Нет открытых сделок по {{ symbol }}. Откройте новую кнопкой «Купить» или «Шорт».</p>
+    {% endif %}
+</div>
+
+<!-- ─── Модалка ручной торговли ─── -->
+<div id="trade-modal" class="trade-modal-overlay" style="display: none;">
+    <div class="trade-modal">
+        <div class="trade-modal-header">
+            <h2 id="trade-modal-title">💰 Новая сделка</h2>
+            <button type="button" class="trade-modal-close" onclick="closeTradeModal()">✕</button>
+        </div>
+        <form id="trade-form"
+              hx-post="/coin/{{ encoded }}/manual-open?tf={{ tf }}"
+              hx-target="#manual-result"
+              hx-swap="innerHTML"
+              onsubmit="setTimeout(closeTradeModal, 800)">
+            <input type="hidden" name="side" id="trade-side-input" value="long">
+
+            <div class="trade-modal-body">
+                <div class="form-group">
+                    <label>Сторона</label>
+                    <div class="side-toggle">
+                        <button type="button" class="side-btn side-long active" data-side="long"
+                                onclick="selectSide('long')">📈 LONG</button>
+                        <button type="button" class="side-btn side-short" data-side="short"
+                                onclick="selectSide('short')">📉 SHORT</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Количество монет (qty)</label>
+                    <input type="number" name="qty" id="trade-qty" step="0.000001" min="0.000001" required>
+                    <small class="form-hint">Сколько монет купить/продать</small>
+                </div>
+                <div class="form-group">
+                    <label>Цена входа (USDT)</label>
+                    <input type="number" name="price" id="trade-price"
+                           step="any" min="0.01"
+                           value="{{ current_price|pricefmt if current_price else '' }}"
+                           required>
+                    <small class="form-hint">Текущая цена: ${{ current_price|pricefmt if current_price else "—" }}</small>
+                </div>
+                <div class="form-group">
+                    <label>Сумма позиции</label>
+                    <input type="text" id="trade-total" value="$0.00" disabled>
+                    <small class="form-hint">= qty × цена (авторасчёт)</small>
+                </div>
+                <div class="form-group">
+                    <label>Стоп-лосс (USDT) <span id="auto-stop-label" style="color: var(--text-dim); font-weight: normal;">— авто по ATR</span></label>
+                    <input type="number" name="stop_price" id="trade-stop"
+                           step="any" min="0"
+                           value="{{ (current_price - atr_k_stop * atr)|pricefmt if current_price and atr > 0 else '0' }}"
+                           placeholder="0">
+                    <small class="form-hint">Цена принудительного выхода с убытком</small>
+                </div>
+                <div class="form-group">
+                    <label>Тейк-профит (USDT) <span id="auto-target-label" style="color: var(--text-dim); font-weight: normal;">— авто по ATR</span></label>
+                    <input type="number" name="target_price" id="trade-target"
+                           step="any" min="0"
+                           value="{{ (current_price + atr_k_take * atr)|pricefmt if current_price and atr > 0 else '0' }}"
+                           placeholder="0">
+                    <small class="form-hint">Цена фиксации прибыли</small>
+                </div>
+            </div>
+
+            <div class="trade-modal-footer">
+                <span id="manual-result" style="margin-right: auto;"></span>
+                <button type="button" class="btn" onclick="closeTradeModal()">Отмена</button>
+                <button type="submit" class="btn btn-success" id="trade-submit">Открыть сделку</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ─── Indicators ─── -->
+{% if snap %}
+<div class="grid-3">
+    <div class="card">
+        <div class="card-header">RSI</div>
+        <div class="stat-value" style="{% if snap.rsi > 70 %}color: var(--red){% elif snap.rsi < 30 %}color: var(--green){% endif %}">
+            {{ "%.1f"|format(snap.rsi) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header">ADX (тренд, порог {{ "%.0f"|format(strategy_min_adx) }})</div>
+        <div class="stat-value" style="{% if snap.adx >= strategy_min_adx %}color: var(--green){% else %}color: var(--red){% endif %}">
+            {{ "%.1f"|format(snap.adx) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header">ATR</div>
+        <div class="stat-value">{{ snap.atr|pricefmt }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">EMA20</div>
+        <div class="stat-value">{{ snap.ema20|pricefmt }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">EMA50</div>
+        <div class="stat-value">{{ snap.ema50|pricefmt }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">MACD</div>
+        <div class="stat-value" style="{% if snap.macd_hist >= 0 %}color: var(--green){% else %}color: var(--red){% endif %}">
+            {{ "%.4f"|format(snap.macd_hist) }}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ─── Новости (LLM-анализ сентимента) ─── -->
+{% if news_enabled %}
+<div class="card" id="news-card">
+    <div class="card-header">
+        📰 Новости
+        {% set news_sentiment = tick_s.news_sentiment %}
+        {% set news_summary = tick_s.news_summary %}
+        {% set news_conf = tick_s.news_confidence %}
+        {% if news_sentiment is not none %}
+            <span class="tag {% if news_sentiment > 0.2 %}tag-green{% elif news_sentiment < -0.2 %}tag-red{% else %}tag-blue{% endif %}" id="news-badge">
+                {% if news_sentiment > 0.3 %}🟢 Бычий
+                {% elif news_sentiment > 0.05 %}🟢 Слабо бычий
+                {% elif news_sentiment < -0.3 %}🔴 Медвежий
+                {% elif news_sentiment < -0.05 %}🔴 Слабо медвежий
+                {% else %}⚪ Нейтральный
+                {% endif %}
+                · {{ "%.0f"|format((news_sentiment * 100)|abs) }}%
+                {% if news_conf is not none %}· конф. {{ "%.0f"|format(news_conf * 100) }}%{% endif %}
+            </span>
+        {% endif %}
+        <button type="button" class="btn btn-xs" style="margin-left: auto;"
+                onclick="refreshNews()" id="news-refresh-btn">↻ Обновить</button>
+    </div>
+    <div id="news-body" style="font-size: 0.92em; line-height: 1.5;">
+        {% if news_has_key %}
+            {% if news_summary %}
+                <div id="news-summary" style="margin-bottom: 8px;">{{ news_summary }}</div>
+                {% if tick_s.news_key_events %}
+                <ul id="news-events" style="margin: 6px 0 8px 18px; padding: 0;">
+                    {% for ev in tick_s.news_key_events %}
+                    <li style="color: var(--text-dim);">{{ ev }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if tick_s.news_sources %}
+                <div id="news-sources" style="font-size: 0.82em; color: var(--text-dim); margin-top: 6px;">
+                    📎 Источники:
+                    {% for src in tick_s.news_sources[:4] %}
+                    <a href="{{ src }}" target="_blank" rel="noopener" style="color: var(--accent);">{{ src|replace('https://', '')|truncate(35) }}</a>{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% else %}
+                <div id="news-loading" style="color: var(--text-dim);">
+                    Загрузка новостей за последние {{ news_lookback_days }} дн. ({{ news_provider|upper }} + Search)…
+                </div>
+            {% endif %}
+        {% else %}
+            <div style="color: var(--text-dim);">
+                ⚙️ Новостной индикатор отключён. Для включения задайте ключ в <code>.env</code>:
+                <ul style="margin: 6px 0 0 18px; padding: 0;">
+                    <li><b>OpenRouter</b> (бесплатно): <code>OPENROUTER_API_KEY</code> —
+                        <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a></li>
+                    <li><b>Tavily Search</b> (1000/мес): <code>TAVILY_API_KEY</code> —
+                        <a href="https://tavily.com" target="_blank" rel="noopener">tavily.com</a></li>
+                </ul>
+                Без ключей <code>f_news</code> = 0.5 (нейтрально).
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ─── Kronos прогноз ─── -->
+{% if pred %}
+<div class="card">
+    <div class="card-header">
+        🧠 Kronos прогноз ({{ pred.horizon }} свечей)
+        <span class="tag tag-blue">~{{ "%.0f"|format(pred.inference_ms) }}мс</span>
+    </div>
+    <div class="grid-4">
+        <div>
+            <div class="stat-label">Прогноз return</div>
+            <div class="stat-value {% if pred.pred_return >= 0 %}positive{% else %}negative{% endif %}">
+                {{ "%+.2f%%"|format(pred.pred_return * 100) }}
+            </div>
+        </div>
+        <div>
+            <div class="stat-label">Макс. High</div>
+            <div class="stat-value">{{ pred.pred_max_high|pricefmt }}</div>
+        </div>
+        <div>
+            <div class="stat-label">Мин. Low</div>
+            <div class="stat-value">{{ pred.pred_min_low|pricefmt }}</div>
+        </div>
+        <div>
+            <div class="stat-label">Наклон</div>
+            <div class="stat-value" style="{% if pred.pred_path_slope > 0 %}color: var(--green){% else %}color: var(--red){% endif %}">
+                {{ "%+.6f"|format(pred.pred_path_slope) }}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    // ─── График свечей + Kronos прогноз + маркеры точности ───
+    var ohlc = {{ chart_ohlc | tojson }};
+    var predClose = {{ chart_pred_close | tojson }};
+    var predHigh = {{ chart_pred_high | tojson }};
+    var predLow = {{ chart_pred_low | tojson }};
+    var timestamps = {{ chart_timestamps | tojson }};
+    var accuracy = {{ chart_accuracy | tojson }};
+
+    if (ohlc.length === 0) return;
+
+    var open_ = ohlc.map(function(c) { return c.open; });
+    var high_ = ohlc.map(function(c) { return c.high; });
+    var low_  = ohlc.map(function(c) { return c.low; });
+    var close_= ohlc.map(function(c) { return c.close; });
+
+    var candleTrace = {
+        x: timestamps, open: open_, high: high_, low: low_, close: close_,
+        type: 'candlestick', name: '{{ symbol }}',
+        increasing: { line: { color: '#00cec9' } },
+        decreasing: { line: { color: '#ff6b6b' } },
+    };
+
+    var traces = [candleTrace];
+
+    // Kronos prediction cone — на общей оси Y с реальными свечами.
+    if (predClose.length > 0) {
+        var lastTs = timestamps[timestamps.length - 1];
+        var tfMs = {{ tf | tojson }} === '1h' ? 3600000 : 14400000;
+        var predTs = [];
+        for (var i = 0; i < predClose.length; i++) {
+            predTs.push(new Date(new Date(lastTs).getTime() + (i + 1) * tfMs).toISOString());
+        }
+        var bridgeX = [lastTs, predTs[0]];
+        var bridgeY = [close_[close_.length - 1], predClose[0]];
+        traces.push({ x: bridgeX, y: bridgeY, type: 'scatter', mode: 'lines', showlegend: false, line: { color: '#4a9eff', dash: 'dot' } });
+        traces.push({ x: predTs, y: predClose, type: 'scatter', mode: 'lines', name: 'Kronos прогноз', line: { color: '#74b9ff', width: 2, dash: 'dot' } });
+        traces.push({ x: predTs, y: predHigh, type: 'scatter', mode: 'lines', showlegend: false, line: { color: 'rgba(116,185,255,0.3)' } });
+        traces.push({ x: predTs, y: predLow, type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(116,185,255,0.06)', showlegend: false, line: { color: 'rgba(116,185,255,0.3)' } });
+    }
+
+    // Маркеры точности Kronos: ▲/▼ верно, ✕ ошибка
+    if (accuracy.length > 0) {
+        var accX = [], accY = [], accText = [], accColor = [], accSym = [];
+        for (var i = 0; i < accuracy.length; i++) {
+            var a = accuracy[i];
+            accX.push(a.timestamp);
+            // Y-позиция: чуть выше high или чуть ниже low
+            var idx = timestamps.indexOf(a.timestamp);
+            var yOff = (high_[idx] - low_[idx]) * 0.15;
+            if (a.correct) {
+                accY.push(a.actual_up ? high_[idx] + yOff : low_[idx] - yOff);
+                accSym.push(a.actual_up ? 'triangle-up' : 'triangle-down');
+                accColor.push('#00cec9');
+                accText.push(a.actual_up ? '▲' : '▼');
+            } else {
+                accY.push(a.actual_up ? high_[idx] + yOff : low_[idx] - yOff);
+                accSym.push('x');
+                accColor.push('#ff6b6b');
+                accText.push('✕');
+            }
+        }
+        traces.push({
+            x: accX, y: accY,
+            mode: 'markers+text', name: 'Точность',
+            text: accText, textposition: 'middle center',
+            textfont: { color: accColor, size: 14 },
+            marker: { symbol: accSym, size: 10, color: accColor, line: { width: 1, color: accColor } },
+            showlegend: false,
+            hoverinfo: 'text',
+        });
+    }
+
+    // Определяем видимое окно: последние 80 свечей + прогноз (~20% экрана).
+    var visibleFrom = timestamps.length > 80 ? timestamps[timestamps.length - 80] : timestamps[0];
+    var visibleTo = predClose.length > 0 ?
+        new Date(new Date(timestamps[timestamps.length - 1]).getTime() + (predClose.length + 1) * ({{ tf | tojson }} === '1h' ? 3600000 : 14400000)).toISOString() :
+        timestamps[timestamps.length - 1];
+
+    var layout = {
+        paper_bgcolor: 'var(--surface)', plot_bgcolor: 'var(--surface)',
+        font: { color: 'var(--text)', size: 11 },
+        margin: { t: 10, r: 10, b: 40, l: 60 },
+        xaxis: {
+            rangeslider: { visible: false },
+            showgrid: true, gridcolor: 'var(--border)', type: 'date',
+            range: [visibleFrom, visibleTo],
+        },
+        yaxis: {
+            title: 'Цена', showgrid: true, gridcolor: 'var(--border)',
+            autorange: true,
+        },
+        showlegend: true, legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(0,0,0,0)', font: { color: 'var(--text-dim)' } },
+        height: 500,
+    };
+
+    Plotly.newPlot('candle-chart', traces, layout, { responsive: true });
+
+    // ─── Polling: обновление цены и вероятности каждые 5 сек ───
+    var encodedSymbol = {{ encoded | tojson }};
+    var currentTf = {{ tf | tojson }};
+    var pollUrl = '/api/live/' + encodedSymbol + '?tf=' + currentTf;
+
+    function pollLive() {
+        fetch(pollUrl)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.price) {
+                    document.getElementById('live-price').textContent = '$' + pricefmtJS(data.price);
+                    currentSymbolPrice = data.price;
+                    if (typeof updatePositionsPnl === 'function') {
+                        updatePositionsPnl(data.price);
+                    }
+                }
+                if (data.s_entry !== null && data.s_entry !== undefined) {
+                    document.getElementById('live-sentry').textContent = data.s_entry.toFixed(3);
+                }
+                // Обновляем вероятность/подпись ТОЛЬКО когда есть данные своего ТФ.
+                // direction=null (нет данных) → не трогаем подпись, оставляем серверную.
+                if (data.win_prob !== null && data.win_prob !== undefined
+                        && data.direction !== null && data.direction !== undefined) {
+                    var el = document.getElementById('live-prob');
+                    var label = document.getElementById('live-prob-label');
+                    el.textContent = (data.win_prob * 100).toFixed(0) + '%';
+                    if (data.direction === 'down') {
+                        el.style.color = 'var(--red)';
+                        label.textContent = '▼ Вероятность падения';
+                    } else {
+                        el.style.color = data.win_prob >= 0.6 ? 'var(--green)' :
+                                         data.win_prob >= 0.4 ? 'var(--yellow)' : 'var(--red)';
+                        label.textContent = '▲ Вероятность роста';
+                    }
+                }
+                if (data.sub_signals) {
+                    var subsEl = document.getElementById('live-subs');
+                    var subs = data.sub_signals;
+                    // Считаем сколько ключей — пустой объект {} не должен затирать UI.
+                    var keys = Object.keys(subs);
+                    if (keys.length > 0) {
+                        var html = '';
+                        for (var k in subs) {
+                            var v = subs[k];
+                            // Защита от не-чисел (на всякий случай).
+                            v = (typeof v === 'number' && !isNaN(v)) ? v : 0;
+                            // Не показываем -0.00.
+                            if (Object.is(v, -0)) v = 0;
+                            html += '<div class="subsignal-item">' +
+                                '<span class="subsignal-name">' + k + '</span>' +
+                                '<div class="subsignal-bar"><div class="subsignal-fill" style="width:' + (v*100).toFixed(0) + '%"></div></div>' +
+                                '<span class="subsignal-val">' + v.toFixed(2) + '</span></div>';
+                        }
+                        subsEl.innerHTML = html;
+                    }
+                    // Если keys.length === 0 — не трогаем subsEl (оставляем что есть).
+                }
+                if (data.updated_at) {
+                    document.getElementById('live-time').textContent = 'обновлено: ' + data.updated_at.slice(11, 19);
+                }
+                // Обновление новостной карточки (если sentiment пришёл).
+                updateNewsCard(data);
+            })
+            .catch(function() {});
+    }
+    setInterval(pollLive, 5000);
+})();
+</script>
+
+<script>
+// ─── Модалка ручной торговли (Long/Short + qty + price) ───
+var currentSymbolPrice = {{ current_price | tojson if current_price else 'null' }};
+
+function openTradeModal(side) {
+    var modal = document.getElementById('trade-modal');
+    modal.style.display = 'flex';
+    // Сбрасываем флаги ручной правки стопов — модалка открывается заново.
+    _userEditedStops = {stop: false, target: false};
+    selectSide(side || 'long');
+    // Предзаполняем цену текущей рыночной.
+    var priceInput = document.getElementById('trade-price');
+    if (currentSymbolPrice && !priceInput.value) {
+        priceInput.value = pricefmtJS(currentSymbolPrice);
+    }
+    recalcTotal();
+    recalcStops();
+    setTimeout(function() { document.getElementById('trade-qty').focus(); }, 50);
+}
+
+function closeTradeModal() {
+    document.getElementById('trade-modal').style.display = 'none';
+}
+
+function selectSide(side) {
+    document.getElementById('trade-side-input').value = side;
+    document.querySelectorAll('.side-btn').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-side') === side);
+    });
+    var title = document.getElementById('trade-modal-title');
+    var submit = document.getElementById('trade-submit');
+    if (side === 'short') {
+        title.textContent = '📉 Шорт (SHORT)';
+        submit.textContent = 'Открыть шорт';
+    } else {
+        title.textContent = '📈 Покупка (LONG)';
+        submit.textContent = 'Открыть лонг';
+    }
+    recalcStops();
+}
+
+// Пересчёт стоп/таргета по ATR при смене цены или стороны.
+// Пользователь может перезаписать значения вручную — авторасчёт не трогает
+// уже отредактированные поля (отслеживаем флаг _userEditedStops).
+var _userEditedStops = {stop: false, target: false};
+var _atrValue = {{ atr | tojson }};
+var _atrKStop = {{ atr_k_stop | tojson }};
+var _atrKTake = {{ atr_k_take | tojson }};
+
+function recalcStops() {
+    var price = parseFloat(document.getElementById('trade-price').value) || 0;
+    var side = document.getElementById('trade-side-input').value;
+    if (price <= 0 || !_atrValue || _atrValue <= 0) return;
+
+    var stopInput = document.getElementById('trade-stop');
+    var targetInput = document.getElementById('trade-target');
+
+    if (side === 'short') {
+        // short: стоп ВЫШЕ входа, таргет НИЖЕ.
+        if (!_userEditedStops.stop) {
+            stopInput.value = pricefmtJS(price + _atrKStop * _atrValue);
+        }
+        if (!_userEditedStops.target) {
+            targetInput.value = pricefmtJS(price - _atrKTake * _atrValue);
+        }
+    } else {
+        // long: стоп НИЖЕ входа, таргет ВЫШЕ.
+        if (!_userEditedStops.stop) {
+            stopInput.value = pricefmtJS(price - _atrKStop * _atrValue);
+        }
+        if (!_userEditedStops.target) {
+            targetInput.value = pricefmtJS(price + _atrKTake * _atrValue);
+        }
+    }
+}
+
+function recalcTotal() {
+    var qty = parseFloat(document.getElementById('trade-qty').value) || 0;
+    var price = parseFloat(document.getElementById('trade-price').value) || 0;
+    document.getElementById('trade-total').value = '$' + (qty * price).toFixed(2);
+    recalcStops();
+}
+
+// Закрытие по клику на overlay / Esc.
+document.addEventListener('DOMContentLoaded', function() {
+    var modal = document.getElementById('trade-modal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) closeTradeModal();
+        });
+    }
+    document.getElementById('trade-qty').addEventListener('input', recalcTotal);
+    document.getElementById('trade-price').addEventListener('input', recalcTotal);
+    // Отслеживаем ручную правку стоп/таргета — чтобы авто-расчёт не затирал.
+    document.getElementById('trade-stop').addEventListener('input', function() {
+        _userEditedStops.stop = true;
+    });
+    document.getElementById('trade-target').addEventListener('input', function() {
+        _userEditedStops.target = true;
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeTradeModal();
+    });
+});
+
+// ─── Live PnL для открытых сделок ───
+function updatePositionsPnl(livePrice) {
+    if (!livePrice) return;
+    document.querySelectorAll('.pos-current-price').forEach(function(td) {
+        var entry = parseFloat(td.getAttribute('data-entry'));
+        var side = td.getAttribute('data-side');
+        var qty = parseFloat(td.getAttribute('data-qty'));
+        var liveSpan = td.querySelector('.pos-live-price');
+        if (liveSpan) liveSpan.textContent = '$' + pricefmtJS(livePrice);
+
+        var pnlTd = td.parentElement.querySelector('.pos-pnl');
+        if (pnlTd && entry > 0) {
+            var pnl;
+            if (side === 'short') {
+                pnl = (entry - livePrice) * qty;
+            } else {
+                pnl = (livePrice - entry) * qty;
+            }
+            var color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+            pnlTd.innerHTML = '<span style="color:' + color + ';">' +
+                (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(4) + '</span>';
+        }
+    });
+}
+
+// После успешного закрытия сделки через HTMX — обновляем страницу, чтобы
+// список пересчитался (HTMX возвращает сниппет в скрытую строку-результат).
+document.addEventListener('htmx:afterRequest', function(e) {
+    var target = e.detail.target;
+    if (target && target.id && target.id.indexOf('pos-result-') === 0) {
+        setTimeout(function() { location.reload(); }, 1000);
+    }
+    if (target && target.id === 'manual-result' && e.detail.successful) {
+        setTimeout(function() { location.reload(); }, 1000);
+    }
+});
+
+// Переопределяем pollLive, чтобы он также обновлял PnL сделок.
+(function() {
+    var origPoll = window.pollLive;
+    var origSetInterval = window.setInterval;
+})();
+
+// ─── Модалка подтверждения закрытия позиции с PnL ───
+
+// Глобальная функция форматирования цены (адаптивные знаки для дешёвых монет).
+function pricefmtJS(v) {
+    if (v >= 1000) return v.toFixed(2);
+    if (v >= 1) return v.toFixed(4);
+    if (v >= 0.1) return v.toFixed(5);
+    if (v >= 0.001) return v.toFixed(6);
+    return v.toFixed(8);
+}
+
+// ─── Новостная карточка: обновление из polling + ручное обновление ───
+var _newsEncoded = {{ encoded | tojson }};
+
+function _newsBadgeHtml(s) {
+    var pct = Math.abs(Math.round(s * 100));
+    var txt, cls;
+    if (s > 0.3) { txt = '🟢 Бычий'; cls = 'tag-green'; }
+    else if (s > 0.05) { txt = '🟢 Слабо бычий'; cls = 'tag-green'; }
+    else if (s < -0.3) { txt = '🔴 Медвежий'; cls = 'tag-red'; }
+    else if (s < -0.05) { txt = '🔴 Слабо медвежий'; cls = 'tag-red'; }
+    else { txt = '⚪ Нейтральный'; cls = 'tag-blue'; }
+    return '<span class="tag ' + cls + '">' + txt + ' · ' + pct + '%</span>';
+}
+
+function updateNewsCard(data) {
+    if (data.news_sentiment === null || data.news_sentiment === undefined) return;
+    var badgeEl = document.getElementById('news-badge');
+    if (badgeEl) badgeEl.outerHTML = _newsBadgeHtml(data.news_sentiment).replace('<span', '<span id="news-badge"');
+
+    var bodyEl = document.getElementById('news-body');
+    if (!bodyEl || !data.news_summary) return;
+    var html = '<div id="news-summary" style="margin-bottom: 8px;">' + data.news_summary + '</div>';
+    if (data.news_key_events && data.news_key_events.length) {
+        html += '<ul id="news-events" style="margin: 6px 0 8px 18px; padding: 0;">';
+        data.news_key_events.forEach(function(ev) {
+            html += '<li style="color: var(--text-dim);">' + ev + '</li>';
+        });
+        html += '</ul>';
+    }
+    if (data.news_sources && data.news_sources.length) {
+        html += '<div id="news-sources" style="font-size: 0.82em; color: var(--text-dim); margin-top: 6px;">📎 Источники: ';
+        data.news_sources.slice(0, 4).forEach(function(src, i, arr) {
+            var label = src.replace('https://', '').substring(0, 35);
+            html += '<a href="' + src + '" target="_blank" rel="noopener" style="color: var(--accent);">' + label + '</a>';
+            if (i < arr.length - 1) html += ', ';
+        });
+        html += '</div>';
+    }
+    bodyEl.innerHTML = html;
+}
+
+function refreshNews() {
+    var btn = document.getElementById('news-refresh-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Запрос…'; }
+    var bodyEl = document.getElementById('news-body');
+    if (bodyEl) {
+        bodyEl.innerHTML = '<div id="news-loading" style="color: var(--text-dim);">🔄 Анализирую свежие новости (10-30 сек)…</div>';
+    }
+    fetch('/api/news/' + _newsEncoded + '/refresh', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                updateNewsCard({
+                    news_sentiment: data.sentiment,
+                    news_summary: data.summary,
+                    news_confidence: data.confidence,
+                    news_sources: data.sources,
+                    news_key_events: data.key_events,
+                });
+            } else {
+                if (bodyEl) {
+                    bodyEl.innerHTML = '<div style="color: var(--red);">⚠️ ' + (data.error || 'Ошибка') + '</div>';
+                }
+            }
+        })
+        .catch(function() {
+            if (bodyEl) {
+                bodyEl.innerHTML = '<div style="color: var(--red);">⚠️ Сетевая ошибка</div>';
+            }
+        })
+        .finally(function() {
+            if (btn) { btn.disabled = false; btn.textContent = '↻ Обновить'; }
+        });
+}
+
+var _closePosId = null;
+var _closeCsrfToken = '';
+
+function confirmClosePos(posId, symbol, side, entryPrice, qty) {
+    _closePosId = posId;
+    var modal = document.getElementById('close-modal');
+    var title = document.getElementById('close-modal-title');
+    var pnlEl = document.getElementById('close-modal-pnl');
+    var detail = document.getElementById('close-modal-detail');
+    var sideLabel = side === 'short' ? 'SHORT' : 'LONG';
+
+    title.textContent = 'Закрыть ' + sideLabel + ' ' + symbol + ' #' + posId + '?';
+    detail.textContent = 'Вход: $' + pricefmtJS(entryPrice) + ' | Qty: ' + qty.toFixed(6);
+    pnlEl.textContent = 'Загрузка...';
+    pnlEl.style.color = '#888';
+    modal.style.display = 'flex';
+
+    fetch('/api/position-pnl?id=' + posId, {cache: 'no-store'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var pnl = data.pnl || 0;
+            var price = data.price || entryPrice;
+            var sign = pnl >= 0 ? '+' : '';
+            pnlEl.textContent = sign + '$' + pnl.toFixed(2) + (pnl >= 0 ? ' прибыль' : ' убыток');
+            pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+            detail.textContent = 'Вход: $' + pricefmtJS(entryPrice) + ' | Текущая: $' + pricefmtJS(price) + ' | Qty: ' + qty.toFixed(6);
+            _closeCsrfToken = data.csrf || '';
+        })
+        .catch(function() {
+            pnlEl.textContent = 'Ошибка загрузки цены';
+        });
+}
+
+function hideCloseModal() {
+    document.getElementById('close-modal').style.display = 'none';
+    _closePosId = null;
+}
+
+function doClose() {
+    if (!_closePosId) return;
+    var pnlEl = document.getElementById('close-modal-pnl');
+    pnlEl.textContent = 'Закрытие...';
+
+    fetch('/positions/' + _closePosId + '/close', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'csrf_token=' + encodeURIComponent(_closeCsrfToken || ''),
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+        hideCloseModal();
+        window.location.reload();
+    })
+    .catch(function() {
+        pnlEl.textContent = 'Ошибка закрытия';
+    });
+}
+
+// Закрыть модалку по клику на фон / Escape
+document.addEventListener('DOMContentLoaded', function() {
+    var modal = document.getElementById('close-modal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) hideCloseModal();
+        });
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideCloseModal();
+    });
+});
+</script>
+
+<!-- Модалка подтверждения закрытия -->
+<div id="close-modal" style="display:none; position:fixed; inset:0; z-index:9999;
+     background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);
+     justify-content:center; align-items:center;">
+  <div style="background:var(--bg-card, #1e2235); border:1px solid var(--border, #2d3148);
+       border-radius:12px; padding:28px 32px; max-width:400px; width:90%; text-align:center;">
+    <div id="close-modal-title" style="font-size:18px; font-weight:700; margin-bottom:12px; color:#e4e6f0;"></div>
+    <div id="close-modal-pnl" style="font-size:28px; font-weight:800; margin:16px 0;"></div>
+    <div id="close-modal-detail" style="font-size:13px; color:#888; margin-bottom:20px;"></div>
+    <div style="display:flex; gap:12px; justify-content:center;">
+      <button onclick="doClose()"
+          style="background:var(--red, #e74c3c); color:#fff; border:none; padding:12px 28px;
+                 border-radius:8px; cursor:pointer; font-size:15px; font-weight:700; flex:1;">
+          Да, закрыть
+      </button>
+      <button onclick="hideCloseModal()"
+          style="background:var(--bg-secondary, #2d3148); color:#e4e6f0; border:1px solid var(--border, #3d4168);
+                 padding:12px 28px; border-radius:8px; cursor:pointer; font-size:15px; flex:1;">
+          Отмена
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка редактирования стоп/тейк позиции -->
+<div id="edit-modal" style="display:none; position:fixed; inset:0; z-index:9999;
+     background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);
+     justify-content:center; align-items:center;">
+  <div style="background:var(--bg-card, #1e2235); border:1px solid var(--border, #2d3148);
+       border-radius:12px; padding:28px 32px; max-width:420px; width:90%;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div id="edit-modal-title" style="font-size:18px; font-weight:700; color:#e4e6f0;">✎ Изменить сделку</div>
+      <button type="button" onclick="hideEditModal()"
+          style="background:transparent; border:none; color:#888; font-size:20px; cursor:pointer;">✕</button>
+    </div>
+    <div id="edit-modal-detail" style="font-size:13px; color:#888; margin-bottom:16px;"></div>
+    <div class="form-group" style="margin-bottom:14px;">
+      <label>Стоп-лосс (USDT)</label>
+      <input type="number" id="edit-stop" step="any" min="0" style="width:100%;">
+      <small class="form-hint" id="edit-stop-hint"></small>
+    </div>
+    <div class="form-group" style="margin-bottom:16px;">
+      <label>Тейк-профит (USDT)</label>
+      <input type="number" id="edit-target" step="any" min="0" style="width:100%;">
+      <small class="form-hint" id="edit-target-hint"></small>
+    </div>
+    <div id="edit-modal-result" style="margin-bottom:12px;"></div>
+    <div style="display:flex; gap:12px; justify-content:flex-end;">
+      <button type="button" onclick="hideEditModal()"
+          style="background:var(--bg-secondary, #2d3148); color:#e4e6f0; border:1px solid var(--border, #3d4168);
+                 padding:12px 24px; border-radius:8px; cursor:pointer; font-size:14px;">
+          Отмена
+      </button>
+      <button type="button" onclick="doEdit()"
+          style="background:var(--green, #2ecc71); color:#fff; border:none; padding:12px 24px;
+                 border-radius:8px; cursor:pointer; font-size:14px; font-weight:700;">
+          💾 Сохранить
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Модалка редактирования позиции (стоп/тейк) ───
+var _editPosId = null;
+
+function openEditModal(posId, side, entryPrice, stopPrice, targetPrice) {
+    _editPosId = posId;
+    var modal = document.getElementById('edit-modal');
+    var title = document.getElementById('edit-modal-title');
+    var detail = document.getElementById('edit-modal-detail');
+    var sideLabel = side === 'short' ? 'SHORT' : 'LONG';
+    var sideColor = side === 'short' ? 'var(--red)' : 'var(--green)';
+
+    title.innerHTML = '✎ Изменить сделку #' + posId +
+        ' <span style="color:' + sideColor + '; font-size:14px;">' + sideLabel + '</span>';
+    detail.textContent = 'Вход: $' + pricefmtJS(entryPrice);
+
+    var stopInput = document.getElementById('edit-stop');
+    var targetInput = document.getElementById('edit-target');
+    stopInput.value = stopPrice > 0 ? pricefmtJS(stopPrice) : '';
+    targetInput.value = targetPrice > 0 ? pricefmtJS(targetPrice) : '';
+
+    // Подсказки по стороне.
+    var stopHint = document.getElementById('edit-stop-hint');
+    var targetHint = document.getElementById('edit-target-hint');
+    if (side === 'short') {
+        stopHint.textContent = 'Стоп должен быть ВЫШЕ входа ($' + pricefmtJS(entryPrice) + ')';
+        targetHint.textContent = 'Тейк должен быть НИЖЕ входа ($' + pricefmtJS(entryPrice) + ')';
+    } else {
+        stopHint.textContent = 'Стоп должен быть НИЖЕ входа ($' + pricefmtJS(entryPrice) + ')';
+        targetHint.textContent = 'Тейк должен быть ВЫШЕ входа ($' + pricefmtJS(entryPrice) + ')';
+    }
+
+    document.getElementById('edit-modal-result').innerHTML = '';
+    modal.style.display = 'flex';
+    stopInput.focus();
+}
+
+function hideEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+    _editPosId = null;
+}
+
+function doEdit() {
+    if (!_editPosId) return;
+    var resultEl = document.getElementById('edit-modal-result');
+    var stopVal = document.getElementById('edit-stop').value;
+    var targetVal = document.getElementById('edit-target').value;
+
+    var formData = new FormData();
+    if (stopVal !== '') formData.append('stop_price', stopVal);
+    if (targetVal !== '') formData.append('target_price', targetVal);
+
+    resultEl.innerHTML = '<small style="color:#888;">Сохранение...</small>';
+
+    fetch('/positions/' + _editPosId + '/edit', {
+        method: 'POST',
+        body: formData,
+    })
+    .then(function(resp) {
+        return resp.text().then(function(html) {
+            return { ok: resp.ok, html: html };
+        });
+    })
+    .then(function(data) {
+        resultEl.innerHTML = data.html;
+        if (data.ok) {
+            // Успех — перезагружаем страницу через секунду, чтобы обновить таблицу.
+            setTimeout(function() {
+                hideEditModal();
+                window.location.reload();
+            }, 1000);
+        }
+    })
+    .catch(function() {
+        resultEl.innerHTML = '<small style="color: var(--red);">Ошибка соединения</small>';
+    });
+}
+
+// Закрыть модалку редактирования по клику на фон / Escape.
+document.addEventListener('DOMContentLoaded', function() {
+    var modal = document.getElementById('edit-modal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) hideEditModal();
+        });
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideEditModal();
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 style="margin-bottom: 16px;">📊 Аналитика</h1>
+
+<!-- ─── Equity + Drawdown chart ─── -->
+<div class="card" style="margin-bottom: 16px;">
+    <div class="card-header">Equity кривая и просадки</div>
+    <div id="equity-chart" class="plotly-chart" style="height: 350px;"></div>
+</div>
+
+<!-- ─── Metrics grid ─── -->
+{% if report %}
+<div class="grid-3" style="margin-bottom: 16px;">
+    <div class="card">
+        <div class="stat-label">Всего сделок</div>
+        <div class="stat-value">{{ report.total_trades }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value {% if report.win_rate >= 0.5 %}positive{% else %}negative{% endif %}">
+            {{ "%.1f%%"|format(report.win_rate * 100) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Profit Factor</div>
+        <div class="stat-value {% if report.profit_factor >= 1.5 %}positive{% elif report.profit_factor >= 1.0 %}neutral{% else %}negative{% endif %}">
+            {{ "%.2f"|format(report.profit_factor) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Общий PnL</div>
+        <div class="stat-value {% if report.total_pnl >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.2f$"|format(report.total_pnl) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">PnL %</div>
+        <div class="stat-value {% if report.total_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.2f%%"|format(report.total_pnl_pct) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Expectancy</div>
+        <div class="stat-value {% if report.expectancy >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.4f$"|format(report.expectancy) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Средний Win</div>
+        <div class="stat-value positive">{{ "%+.2f$"|format(report.avg_win) if report.avg_win else "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Средний Loss</div>
+        <div class="stat-value negative">{{ "%+.2f$"|format(report.avg_loss) if report.avg_loss else "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Max Drawdown</div>
+        <div class="stat-value negative">{{ "%.2f%%"|format(report.max_drawdown) }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Sharpe</div>
+        <div class="stat-value">{{ "%.2f"|format(report.sharpe) if report.sharpe else "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Sortino</div>
+        <div class="stat-value">{{ "%.2f"|format(report.sortino) if report.sortino else "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Комиссии (fee drag)</div>
+        <div class="stat-value negative">{{ "%.2f$ (%.1f%% PnL)"|format(report.total_fees, report.fee_drag_pct * 100) }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ─── Trade table ─── -->
+<div class="card">
+    <div class="card-header">История сделок</div>
+    {% if trades %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Время</th>
+                <th>Монета</th>
+                <th>Сторона</th>
+                <th>Кол-во</th>
+                <th>Цена</th>
+                <th>Комиссия</th>
+                <th>Слипедж</th>
+                <th>PnL</th>
+                <th>Причина</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trade in trades %}
+            <tr>
+                <td>{{ trade.executed_at.strftime("%Y-%m-%d %H:%M") if trade.executed_at else "—" }}</td>
+                <td>{{ trade.coin_symbol }}</td>
+                <td>
+                    <span class="tag {% if trade.side.value == 'buy' %}tag-green{% else %}tag-blue{% endif %}">
+                        {{ trade.side.value | upper }}
+                    </span>
+                </td>
+                <td>{{ "%.6f"|format(trade.qty) }}</td>
+                <td>{{ trade.price|pricefmt }}</td>
+                <td>{{ "%.4f"|format(trade.fee) }}</td>
+                <td>{{ "%.4f"|format(trade.slippage) }}</td>
+                <td class="{% if trade.pnl >= 0 %}positive{% else %}negative{% endif %}">
+                    {{ "%+.4f$"|format(trade.pnl) }}
+                </td>
+                <td><span class="tag tag-yellow">{{ trade.reason.value }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #8b8fa3;">Сделок пока нет. Включите авто-торговлю или совершите ручную сделку.</p>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var eqX = {{ eq_x | tojson }};
+    var eqY = {{ eq_y | tojson }};
+
+    if (eqX.length === 0) return;
+
+    // Equity curve
+    var equityTrace = {
+        x: eqX, y: eqY,
+        type: 'scatter', mode: 'lines',
+        name: 'Equity',
+        line: { color: '#00cec9', width: 2 },
+        fill: 'tozeroy', fillcolor: 'rgba(0,206,201,0.05)',
+    };
+
+    // Drawdown
+    var ddY = [];
+    var peak = eqY[0];
+    for (var i = 0; i < eqY.length; i++) {
+        if (eqY[i] > peak) peak = eqY[i];
+        ddY.push(peak > 0 ? (peak - eqY[i]) / peak * 100 : 0);
+    }
+    var ddTrace = {
+        x: eqX, y: ddY,
+        type: 'scatter', mode: 'lines',
+        name: 'Drawdown %',
+        line: { color: '#ff6b6b', width: 1.5 },
+        fill: 'tozeroy', fillcolor: 'rgba(255,107,107,0.08)',
+        yaxis: 'y2',
+    };
+
+    // Starting balance reference
+    var startLine = {
+        x: [eqX[0], eqX[eqX.length - 1]],
+        y: [{{ session.initial_balance }}, {{ session.initial_balance }}],
+        type: 'scatter', mode: 'lines',
+        name: 'Стартовый капитал',
+        line: { color: '#6c5ce7', width: 1, dash: 'dash' },
+        showlegend: true,
+    };
+
+    var layout = {
+        paper_bgcolor: '#1a1d2e', plot_bgcolor: '#1a1d2e',
+        font: { color: '#e4e6f0', size: 11 },
+        margin: { t: 10, r: 10, b: 40, l: 60 },
+        xaxis: { showgrid: true, gridcolor: '#2d3148' },
+        yaxis: { title: 'Equity ($)', showgrid: true, gridcolor: '#2d3148' },
+        yaxis2: {
+            title: 'Drawdown %', overlaying: 'y', side: 'right',
+            showgrid: false, rangemode: 'tozero',
+        },
+        showlegend: true, legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(0,0,0,0)' },
+        height: 350,
+    };
+
+    Plotly.newPlot('equity-chart', [equityTrace, ddTrace, startLine], layout, { responsive: true });
+})();
+</script>
+{% endblock %}

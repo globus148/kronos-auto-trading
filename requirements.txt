@@ -1,0 +1,39 @@
+# ─── Веб / API ───
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+python-multipart==0.0.20        # HTMX-формы
+
+# ─── Данные / биржа ───
+ccxt==4.5.48
+pandas==3.0.2
+numpy==2.4.3
+
+# ─── БД ───
+SQLAlchemy==2.0.51
+aiosqlite>=0.22.0              # async SQLite
+SQLAlchemy[asyncio]==2.0.51
+
+# ─── Безопасность (шифрование секретов кошелька live-режима) ───
+cryptography>=42.0.0
+
+# ─── Планировщик / конфиг ───
+APScheduler==3.11.0
+python-dotenv==1.0.1
+pydantic==2.13.4
+pydantic-settings==2.7.1
+
+# ─── ML (Kronos) — ставится позже, на этапе 4 ───
+# PyTorch уже установлен системно: torch==2.11.0+cu128
+# Для Kronos дополнительно нужны:
+huggingface-hub>=0.33.0
+einops>=0.8.0
+safetensors>=0.6.0
+
+# ─── Графики UI ───
+plotly>=5.24.0
+
+# ─── Тесты ───
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

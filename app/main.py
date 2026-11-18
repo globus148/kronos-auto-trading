@@ -4,8 +4,12 @@
     uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 Жизненный цикл:
-    startup  → init_db + разогрев MarketService/DataLifecycle
-    shutdown → dispose_db + остановка планировщика
+    startup  → init_db + закрытие позиций, оставшихся от аварийного выхода
+               + запуск планировщика
+    shutdown → остановка планировщика + закрытие всех открытых позиций
+               + dispose_db
+
+Время во всех логах, signals.csv и БД — UTC (core/timeutil.py).
 """
 
 from __future__ import annotations
@@ -18,13 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from config import settings
+from core.logging_service import setup_logging
 from db.database import dispose_db, init_db
 
+setup_logging()
 logger = logging.getLogger("trading")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 
 # Пути к шаблонам/статике (используются роутами позже).
 TEMPLATES = Jinja2Templates(directory="app/templates")
@@ -64,13 +66,27 @@ TEMPLATES.env.filters["pricefmt"] = _pricefmt
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Полный жизненный цикл приложения (план, этап 8)."""
-    logger.info("Запуск приложения (env=%s)", settings.app_env)
+    setup_logging()
+    logger.info("Запуск приложения (env=%s). Время в логах, CSV и БД — UTC",
+                settings.app_env)
     await init_db()
     logger.info("БД инициализирована: %s", settings.database_url)
 
     # Запуск TradingLoop (планировщик APScheduler, этап 8).
     from core.trading_loop import get_loop
     loop = get_loop()
+
+    # Позиции не переживают выход. Если прошлый запуск завершился аварийно
+    # (закрыли окно консоли, уснул/выключился компьютер) — shutdown-обработчик
+    # не отработал и позиции остались в БД открытыми. Закрываем их сейчас,
+    # до старта планировщика.
+    try:
+        await loop.close_open_positions(
+            "старт после аварийной остановки (позиции остались с прошлого запуска)"
+        )
+    except Exception as exc:
+        logger.exception("Не удалось закрыть позиции прошлого запуска: %s", exc)
+
     await loop.start()
 
     # Предзагрузка Kronos в фоне (ленивая загрузка занимает ~10 сек,
@@ -83,6 +99,8 @@ async def lifespan(app: FastAPI):
             pred_svc = get_prediction_service()
             await asyncio.to_thread(lambda: pred_svc.load())
             logger.info("Kronos предзагружен: %s", pred_svc.is_loaded)
+            # Автоматический первичный расчёт прогнозов для всех монет сразу после загрузки весов
+            asyncio.create_task(loop.refresh_all_predictions())
         except Exception as e:
             logger.warning("Kronos предзагрузка не удалась (CPU fallback?): %s", e)
 
@@ -92,8 +110,15 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         logger.info("Остановка приложения")
+        # stop() останавливает планировщик и закрывает все открытые позиции.
         await loop.stop()
+        try:
+            from core.market_service import get_market
+            await get_market().close()
+        except Exception as exc:
+            logger.debug("MarketService.close: %s", exc)
         await dispose_db()
+        logger.info("Приложение остановлено")
 
 
 app = FastAPI(

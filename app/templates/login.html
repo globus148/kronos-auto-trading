@@ -3,32 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход — Kronos Trading</title>
-    <link rel="stylesheet" href="/static/css/login.css">
+    <title>Вход · Kronos</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/login.css?v=3">
 </head>
 <body>
-    <div class="login-wrapper">
+    <main class="login">
+        <div class="login-brand">
+            <span class="login-mark">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12M6 21h12"/><path d="M7 3c0 5 10 6 10 18M17 3c0 5-10 6-10 18"/></svg>
+            </span>
+            Kronos
+        </div>
         <div class="login-card">
-            <div class="login-logo">⚡ Kronos Trading</div>
             <h1>Вход</h1>
+            <p class="login-sub">Введите пароль, чтобы открыть панель.</p>
 
             {% if error %}
-            <div class="login-error">Неверный пароль. Попробуйте снова.</div>
+            <div class="login-error">Неверный пароль. Попробуйте ещё раз.</div>
             {% endif %}
 
             <form method="post" action="/api/auth/login" autocomplete="off">
-                <div class="form-group">
-                    <label for="password">Пароль</label>
-                    <input type="password"
-                           id="password"
-                           name="password"
-                           placeholder="Введите пароль"
-                           autofocus
-                           required>
-                </div>
-                <button type="submit" class="login-btn">Войти →</button>
+                <label for="password">Пароль</label>
+                <input type="password" id="password" name="password" autofocus required>
+                <button type="submit">Войти</button>
             </form>
         </div>
-    </div>
+    </main>
 </body>
 </html>

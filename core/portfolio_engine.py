@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from core.logging_service import log_trade_close, log_trade_open
 from db.models import (
     Coin,
     EquityPoint,
@@ -294,6 +295,11 @@ class PortfolioEngine:
         logger.info(
             "ОТКРЫТА позиция #%s %s qty=%.6f @ $%.2f fee=$%.4f cash=$%.2f",
             position.id, coin.symbol, sizing.qty, fill_price, fee, session.cash,
+        )
+        log_trade_open(
+            coin.symbol, timeframe, "long", fill_price,
+            sizing.stop_price, sizing.target_price, sizing.qty, fee, session.cash,
+            reason.value if hasattr(reason, "value") else str(reason),
         )
         return position, execution
 
@@ -592,6 +598,11 @@ class PortfolioEngine:
             "ОТКРЫТ SHORT #%s %s qty=%.6f @ $%.2f fee=$%.4f cash=$%.2f",
             position.id, coin.symbol, sizing.qty, fill_price, fee, session.cash,
         )
+        log_trade_open(
+            coin.symbol, timeframe, "short", fill_price,
+            sizing.stop_price, sizing.target_price, sizing.qty, fee, session.cash,
+            reason.value if hasattr(reason, "value") else str(reason),
+        )
         return position, execution
 
     # ─── Закрытие позиции ────────────────────────────────────
@@ -684,6 +695,12 @@ class PortfolioEngine:
             position.id, coin.symbol, reason.value, net_pnl, pnl_pct * 100,
             position.bars_held, total_fees, session.cash,
         )
+        log_trade_close(
+            coin.symbol, position.tf,
+            position.side.value if hasattr(position.side, "value") else str(position.side),
+            reason.value if hasattr(reason, "value") else str(reason),
+            fill_price, net_pnl, pnl_pct, position.bars_held, total_fees, session.cash,
+        )
         return result
 
     async def _close_short(
@@ -744,6 +761,11 @@ class PortfolioEngine:
             "fee=$%.4f cash=$%.2f",
             position.id, coin.symbol, reason.value, net_pnl, pnl_pct * 100,
             position.bars_held, total_fees, session.cash,
+        )
+        log_trade_close(
+            coin.symbol, position.tf, "short",
+            reason.value if hasattr(reason, "value") else str(reason),
+            fill_price, net_pnl, pnl_pct, position.bars_held, total_fees, session.cash,
         )
         return result
 
@@ -839,6 +861,11 @@ class PortfolioEngine:
             position.id, coin.symbol, order.qty, order.avg_price,
             order.fee, order.order_id,
         )
+        log_trade_open(
+            coin.symbol, timeframe, "long", order.avg_price,
+            sizing.stop_price, sizing.target_price, order.qty, order.fee, session.cash,
+            f"live:{order.order_id}",
+        )
         return position, execution
 
     async def _close_position_live(
@@ -907,6 +934,11 @@ class PortfolioEngine:
             "fee=$%.6f order=%s",
             position.id, coin.symbol, reason.value, net_pnl, pnl_pct * 100,
             total_fees, order.order_id,
+        )
+        log_trade_close(
+            coin.symbol, position.tf, "long",
+            reason.value if hasattr(reason, "value") else str(reason),
+            order.avg_price, net_pnl, pnl_pct, position.bars_held, total_fees, session.cash,
         )
         return result
 

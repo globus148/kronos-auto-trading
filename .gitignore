@@ -1,4 +1,4 @@
-﻿# Environment & Secrets
+# Environment & Secrets
 .env
 .env.local
 .env.*.local
@@ -19,6 +19,7 @@ data/*.sqlite
 data/*.sqlite3
 
 # Logs & Tunnels
+logs/
 *.log
 cf_tunnel.log
 tunnel.log
@@ -32,3 +33,9 @@ htmlcov/
 .idea/
 .vscode/
 .zcode/
+
+# Архив: старые копии, бэкапы, неиспользуемый код (хранится только локально)
+_archive/
+
+# Локальные файлы ассистентов
+.claude/

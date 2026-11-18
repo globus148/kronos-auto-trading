@@ -21,17 +21,25 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from sqlalchemy.pool import StaticPool
+
 from config import settings
 
-# Движок создаётся один раз на процесс.Для SQLite нужен connect_args
+# Движок создаётся один раз на процесс. Для SQLite нужен connect_args
 # (check_same_thread=False), т.к. сессия используется из разных корутин.
 _is_sqlite = settings.database_url.startswith("sqlite")
+_extra_engine_kwargs: dict = {}
+if settings.database_url in ("sqlite+aiosqlite://", "sqlite+aiosqlite:///:memory:"):
+    # Для in-memory SQLite необходим StaticPool, иначе соединения не делят память
+    # и таблицы/данные исчезают между отдельными сессиями.
+    _extra_engine_kwargs["poolclass"] = StaticPool
 
 engine: AsyncEngine = create_async_engine(
     settings.database_url,
     echo=False,
     future=True,
     connect_args={"check_same_thread": False} if _is_sqlite else {},
+    **_extra_engine_kwargs,
 )
 
 SessionLocal = async_sessionmaker(

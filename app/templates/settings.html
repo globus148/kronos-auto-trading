@@ -1,243 +1,360 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Настройки · Kronos{% endblock %}
+
+{% macro restart_badge() -%}
+<span class="restart-badge" title="Значение читается из .env при запуске">{{ ui.icon('restart') }}Нужен перезапуск</span>
+{%- endmacro %}
+
+{% macro fmt_val(key, meta, v) -%}
+{%- if meta.type == 'int' -%}{{ v|int }}{%- else -%}{{ '%g'|format(v) }}{%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 
-<h1 style="margin-bottom: 16px;">⚙️ Настройки стратегии</h1>
-
-{% if saved %}
-<div style="background: var(--green-bg, #1a3a2a); color: var(--green, #2ecc71);
-            padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid var(--green);">
-    ✅ Настройки сохранены.
-    {% if clamped %}
-    <div style="margin-top: 6px; font-size: 0.9em;">
-        ⚠️ Некоторые значения вне диапазона и были скорректированы:
-        {% for key, (entered, clamped_val) in clamped.items() %}
-        <strong>{{ threshold_labels.get(key, key) }}</strong>: {{ '%.4g'|format(entered) }} → <strong>{{ '%.4g'|format(clamped_val) }}</strong>
-        {% if not loop.last %}; {% endif %}
-        {% endfor %}
+<div class="page-head">
+    <div>
+        <h1>Настройки</h1>
+        <div class="sub">Изменения применяются сразу. Где это невозможно, рядом написано, что нужен перезапуск.</div>
     </div>
-    {% endif %}
 </div>
-{% endif %}
 
-<!-- ─── Редактируемые пороги ─── -->
-<form method="post" action="/settings" style="margin-bottom: 24px;">
-    <div class="card" style="margin-bottom: 16px;">
-        <div class="card-header">
-            🎯 Пороги стратегии (можно менять без перезапуска)
-            <button type="submit" class="btn btn-sm" style="margin-left: auto;">💾 Сохранить</button>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
-            {% for key, meta in threshold_meta.items() %}
-            <div class="form-group">
-                <label>{{ meta.label }}{% if meta.type == 'percent' %} (%) — вводите в процентах{% endif %}</label>
-                <input type="number"
-                       name="{{ key }}"
-                       value="{{ '%.3f'|format(thresholds[key]) if meta.type != 'int' else thresholds[key]|int }}"
-                       step="{{ meta.step }}"
-                       min="{{ meta.min }}"
-                       max="{{ meta.max }}">
-                <small class="form-hint">{{ meta.hint }}{% if meta.type == 'percent' %} Введите число 0.1–{{ meta.max }} (это %).{% endif %}</small>
+<div class="settings-layout">
+    <nav class="settings-nav" id="settings-nav">
+        <a href="#strategy" class="active">Стратегия</a>
+        <a href="#live">Live-торговля</a>
+        <a href="#wallets">Кошельки</a>
+        <a href="#system">Система</a>
+    </nav>
+
+    <div>
+        <!-- ─── Стратегия ─── -->
+        <section class="settings-section" id="strategy">
+            {% if saved %}
+            <div class="notice notice-ok" style="margin-bottom: 16px;">
+                {{ ui.icon('check') }}
+                <div>Настройки сохранены.
+                {% for key, (entered, clamped_val) in clamped.items() %}
+                    <br><strong>{{ threshold_labels.get(key, key) }}</strong>: {{ '%.4g'|format(entered) }} вне диапазона, сохранено {{ '%.4g'|format(clamped_val) }}.
+                {% endfor %}</div>
             </div>
-            {% endfor %}
-        </div>
-    </div>
-</form>
+            {% endif %}
 
-<!-- ─── Кошелёк биржи (live-режим, реальные деньги) ─── -->
-<div class="card" style="margin-bottom: 16px;">
-    <div class="card-header">
-        💰 Кошелёк биржи (Live-режим)
-        <span class="tag {% if active_mode.value == 'live' %}tag-red{% else %}tag-blue{% endif %}">
-            {{ active_mode.value }}
-        </span>
-    </div>
-
-    {% if wallet_error %}
-    <div style="background: var(--red-bg); color: var(--red); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;">
-        ⚠️ {{ wallet_error }}
-    </div>
-    {% endif %}
-
-    <div style="background: var(--surface2); padding: 12px 14px; border-radius: 8px; margin-bottom: 16px;">
-        <strong style="color: var(--yellow);">⚠️ Внимание!</strong>
-        Live-режим использует <strong>настоящие деньги</strong> на бирже.
-        Авто-торговля в live по умолчанию выключена.
-    </div>
-
-    <!-- Список сохранённых кошельков -->
-    {% if wallets %}
-    <table style="margin-bottom: 16px;">
-        <tr>
-            <th>Название</th>
-            <th>Биржа</th>
-            <th>API Key</th>
-            <th>Статус</th>
-            <th>Действия</th>
-        </tr>
-        {% for w in wallets %}
-        <tr>
-            <td>{{ w.label }}</td>
-            <td>{{ w.exchange }}</td>
-            <td style="font-family: monospace; font-size: 0.9em;">{{ w.api_key_masked }}</td>
-            <td>
-                {% if w.is_default %}
-                <span class="tag tag-green">Активный</span>
-                {% else %}
-                <span class="tag tag-yellow">Неактивен</span>
-                {% endif %}
-            </td>
-            <td style="display: flex; gap: 6px;">
-                {% if not w.is_default %}
-                <form method="post" action="/settings/wallet/{{ w.id }}/default" style="display:inline;">
-                    <button type="submit" class="btn btn-xs" title="Сделать активным">✅</button>
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-title">Пороги стратегии</div>
+                    <div class="card-actions">
+                        <span class="section-note ok">{{ ui.icon('check', 'icon-sm') }}Применяются сразу, без перезапуска</span>
+                    </div>
+                </div>
+                <form class="card-body" method="post" action="/settings" id="thresholds-form" novalidate>
+                    <div class="form-grid">
+                        {% for key, meta in threshold_meta.items() %}
+                        <div class="field" data-field="{{ key }}">
+                            <label for="f-{{ key }}">{{ meta.label }}{% if meta.type == 'percent' %}, %{% endif %}</label>
+                            <input type="number" id="f-{{ key }}" name="{{ key }}" data-key="{{ key }}"
+                                   value="{{ fmt_val(key, meta, thresholds[key]) }}"
+                                   step="{{ meta.step }}" min="{{ meta.min }}" max="{{ meta.max }}">
+                            <span class="field-status" aria-live="polite"></span>
+                            <small class="field-hint">{{ meta.hint }} Диапазон {{ '%g'|format(meta.min) }}–{{ '%g'|format(meta.max) }}.</small>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <noscript><button type="submit" class="btn btn-primary" style="margin-top: 16px;">Сохранить</button></noscript>
                 </form>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-title">Расчётные значения</div>
+                    <div class="card-sub">порог безубыточности для входа</div>
+                </div>
+                <div class="card-body" style="padding: 6px 18px;">
+                    <div class="kv">
+                        <div class="kv-row">
+                            <span class="k">Комиссия · проскальзывание</span>
+                            <span class="v">{{ '%g'|format(settings.commission_rate * 100) }}% · {{ '%g'|format(settings.slippage_rate * 100) }}% &nbsp;{{ restart_badge() }}</span>
+                        </div>
+                        <div class="kv-row">
+                            <span class="k">Round-trip cost <span class="faint">= 2 × (комиссия + проскальзывание)</span></span>
+                            <span class="v">{{ '%.3f'|format(settings.round_trip_cost * 100) }}%</span>
+                        </div>
+                        <div class="kv-row">
+                            <span class="k">Мин. ожидаемое движение <span class="faint">= round-trip + запас</span></span>
+                            <span class="v" id="min-move" data-rt="{{ settings.round_trip_cost }}">{{ '%.3f'|format((settings.round_trip_cost + thresholds.margin_of_safety) * 100) }}%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Live-торговля ─── -->
+        <section class="settings-section" id="live">
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-title">Live-торговля</div>
+                    <div class="card-actions">
+                        <span class="tag tag-dot {{ 'tag-red' if active_mode.value == 'live' else 'tag-green' }}">Сейчас: {{ 'Live' if active_mode.value == 'live' else 'Paper' }}</span>
+                    </div>
+                </div>
+                <div class="card-body" style="display: flex; flex-direction: column; gap: 16px;">
+                    <div class="notice notice-warn">
+                        {{ ui.icon('alert') }}
+                        <div>В Live-режиме сделки идут на бирже <strong>с настоящими деньгами</strong>.
+                        Ручные сделки работают всегда, а автоматические — только если включить переключатель ниже.</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 500;">Авто-торговля реальными деньгами</div>
+                            <div class="field-hint" style="margin-top: 2px;">
+                                Применяется сразу. После перезапуска приложения возвращается к значению
+                                <code>LIVE_AUTO_ENABLED</code> из <code>.env</code> (сейчас по умолчанию — выключено).
+                            </div>
+                        </div>
+                        <button type="button" id="live-auto-switch" role="switch"
+                                class="switch is-danger{% if settings.live_auto_enabled %} is-on{% endif %}"
+                                aria-checked="{{ 'true' if settings.live_auto_enabled else 'false' }}"
+                                title="Авто-торговля Live"></button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Кошельки ─── -->
+        <section class="settings-section" id="wallets">
+            <div class="card" id="wallets-card">
+                <div class="card-head">
+                    <div class="card-title">Кошельки биржи</div>
+                    <div class="card-sub">API-ключи для Live-режима</div>
+                    <div class="card-actions"><span class="section-note ok">{{ ui.icon('check', 'icon-sm') }}Применяются сразу</span></div>
+                </div>
+
+                {% if wallet_error %}
+                <div style="padding: 16px 18px 0;">
+                    <div class="notice notice-danger" data-wallet-error>{{ ui.icon('alert') }}<div>{{ wallet_error }}</div></div>
+                </div>
                 {% endif %}
-                <form method="post" action="/settings/wallet/{{ w.id }}/delete"
-                      style="display:inline;"
-                      onsubmit="return confirm('Удалить кошелёк &quot;{{ w.label }}&quot;?');">
-                    <button type="submit" class="btn btn-xs btn-danger" title="Удалить">🗑️</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% else %}
-    <p style="color: var(--text-dim); margin-bottom: 16px;">
-        Нет сохранённых кошельков. Добавьте API-ключи биржи ниже.
-    </p>
-    {% endif %}
 
-    <!-- Форма добавления кошелька -->
-    <h3 style="margin-bottom: 10px;">Добавить кошелёк</h3>
-    <form method="post" action="/settings/wallet" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 12px; align-items: end;">
-        <div class="form-group">
-            <label>Название</label>
-            <input type="text" name="wallet_label" placeholder="Binance main" required>
-        </div>
-        <div class="form-group">
-            <label>Биржа</label>
-            <input type="text" name="wallet_exchange" value="binance" required>
-        </div>
-        <div class="form-group">
-            <label>API Key</label>
-            <input type="text" name="wallet_api_key" placeholder="Введите API Key" required>
-        </div>
-        <div class="form-group">
-            <label>API Secret</label>
-            <input type="password" name="wallet_api_secret" placeholder="Введите API Secret" required>
-        </div>
-        <button type="submit" class="btn" style="margin-bottom: 0;">➕ Добавить</button>
-    </form>
-</div>
-
-<!-- ─── Авто-торговля реальными деньгами ─── -->
-<div class="card" style="margin-bottom: 24px;">
-    <div class="card-header">🔒 Авто-торговля Live</div>
-    <div style="display: flex; align-items: center; gap: 16px;">
-        <div>
-            <p style="margin-bottom: 8px;">
-                Разрешить автоматическую торговлю <strong>реальными деньгами</strong>
-                при включённом авто-режиме на монетах.
-            </p>
-            <p style="color: var(--text-dim); font-size: 0.9em;">
-                По умолчанию выключено. Включайте только если полностью доверяете системе.
-            </p>
-        </div>
-        <form method="post" action="/settings/live-auto-toggle" style="flex-shrink: 0;">
-            <button type="submit"
-                    class="btn {% if settings.live_auto_enabled %}btn-danger{% else %}btn-success{% endif %}"
-                    name="live_auto"
-                    value="{% if settings.live_auto_enabled %}0{% else %}1{% endif %}">
-                {% if settings.live_auto_enabled %}
-                🔴 Авто Live: ВКЛ (остановить)
+                {% if wallets %}
+                <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Название</th><th>Биржа</th><th>API key</th><th>Статус</th><th></th></tr></thead>
+                    <tbody>
+                    {% for w in wallets %}
+                        <tr>
+                            <td style="font-weight: 500;">{{ w.label }}</td>
+                            <td class="muted">{{ w.exchange }}</td>
+                            <td class="mono muted" style="font-size: 12px;">{{ w.api_key_masked }}</td>
+                            <td>
+                                {% if w.is_default %}<span class="tag tag-green tag-dot">Активный</span>
+                                {% else %}<span class="tag">Не используется</span>{% endif %}
+                            </td>
+                            <td class="actions">
+                                {% if not w.is_default %}
+                                <button type="button" class="btn btn-xs btn-ghost"
+                                        hx-post="/settings/wallet/{{ w.id }}/default"
+                                        hx-target="#wallets-card" hx-select="#wallets-card" hx-swap="outerHTML">
+                                    {{ ui.icon('check', 'icon-sm') }}Сделать активным</button>
+                                {% endif %}
+                                <button type="button" class="btn btn-xs btn-ghost-danger"
+                                        hx-post="/settings/wallet/{{ w.id }}/delete"
+                                        hx-target="#wallets-card" hx-select="#wallets-card" hx-swap="outerHTML"
+                                        hx-confirm="Удалить кошелёк «{{ w.label }}»? API-ключи будут стёрты.">
+                                    {{ ui.icon('trash', 'icon-sm') }}Удалить</button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                </div>
                 {% else %}
-                🟢 Авто Live: ВЫКЛ (включить)
+                <div class="empty">Кошельков пока нет. Добавьте API-ключи биржи ниже.</div>
                 {% endif %}
-            </button>
-        </form>
+
+                <div class="card-body" style="border-top: 1px solid var(--border);">
+                    <h3 style="margin-bottom: 12px;">Добавить кошелёк</h3>
+                    <form class="wallet-form" method="post" action="/settings/wallet"
+                          hx-post="/settings/wallet" hx-target="#wallets-card" hx-select="#wallets-card" hx-swap="outerHTML"
+                          autocomplete="off">
+                        <div class="field"><label>Название</label><input type="text" name="wallet_label" placeholder="Binance main" required></div>
+                        <div class="field"><label>Биржа</label><input type="text" name="wallet_exchange" value="binance" required></div>
+                        <div class="field"><label>API key</label><input type="text" name="wallet_api_key" required></div>
+                        <div class="field"><label>API secret</label><input type="password" name="wallet_api_secret" required></div>
+                        <button type="submit" class="btn btn-primary">{{ ui.icon('plus') }}<span class="btn-label">Добавить</span></button>
+                    </form>
+                    <small class="field-hint" style="display: block; margin-top: 10px;">Ключи проверяются на бирже перед сохранением. Давайте ключу только права на торговлю, без вывода средств.</small>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Система ─── -->
+        <section class="settings-section" id="system">
+            <div class="notice" style="margin-bottom: 16px;">
+                {{ ui.icon('restart') }}
+                <div>Эти параметры читаются из файла <code>.env</code> при запуске. Чтобы изменения вошли в силу,
+                отредактируйте <code>.env</code> и <strong>перезапустите приложение</strong>.</div>
+            </div>
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-head"><div class="card-title">Модель Kronos</div><div class="card-actions">{{ restart_badge() }}</div></div>
+                    <div class="card-body" style="padding: 6px 18px;">
+                        <div class="kv">
+                            <div class="kv-row"><span class="k">Модель</span><span class="v mono">{{ settings.kronos_model }}</span></div>
+                            <div class="kv-row"><span class="k">Устройство</span><span class="v mono">{{ settings.kronos_device }}</span></div>
+                            <div class="kv-row"><span class="k">Top-p</span><span class="v">{{ settings.kronos_top_p }}</span></div>
+                            <div class="kv-row"><span class="k">Temperature</span><span class="v">{{ settings.kronos_temperature }}</span></div>
+                            <div class="kv-row"><span class="k">Прогонов (samples)</span><span class="v">{{ settings.kronos_sample_count }}</span></div>
+                            <div class="kv-row"><span class="k">Длина прогноза</span><span class="v">{{ settings.kronos_pred_len }} свечей</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head"><div class="card-title">Данные</div><div class="card-actions">{{ restart_badge() }}</div></div>
+                    <div class="card-body" style="padding: 6px 18px;">
+                        <div class="kv">
+                            <div class="kv-row"><span class="k">Контекст Kronos</span><span class="v">{{ settings.data_kronos_context }}</span></div>
+                            <div class="kv-row"><span class="k">Прогрев индикаторов</span><span class="v">{{ settings.data_indicator_warmup }}</span></div>
+                            <div class="kv-row"><span class="k">Live-буфер</span><span class="v">{{ settings.data_live_buffer }}</span></div>
+                            <div class="kv-row"><span class="k">Нужно истории</span><span class="v">{{ settings.required_history }}</span></div>
+                            <div class="kv-row"><span class="k">Хранится свечей</span><span class="v">{{ settings.retention_size }}</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card span-2">
+                    <div class="card-head"><div class="card-title">Монеты по умолчанию</div><div class="card-actions">{{ restart_badge() }}</div></div>
+                    <div class="card-body" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        {% for coin in settings.default_coins %}<span class="tag">{{ coin }}</span>{% endfor %}
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 </div>
+{% endblock %}
 
-<div class="grid-2">
-    <!-- ─── Риск (только чтение) ─── -->
-    <div class="card">
-        <div class="card-header">📐 Расчётные значения</div>
-        <div class="form-group">
-            <label>Round-trip cost</label>
-            <input type="text" value="{{ "%.4f (%.2f%%)"|format(settings.round_trip_cost, settings.round_trip_cost * 100) }}" disabled>
-            <small class="form-hint">2 × (комиссия {{ settings.commission_rate*100 }}% + slippage {{ settings.slippage_rate*100 }}%)</small>
-        </div>
-        <div class="form-group">
-            <label>Min expected move</label>
-            <input type="text" value="{{ "%.4f (%.2f%%)"|format(settings.min_expected_move, settings.min_expected_move * 100) }}" disabled>
-            <small class="form-hint">Порог безубыточности: round-trip + margin of safety</small>
-        </div>
-    </div>
+{% block scripts %}
+<script>
+// ─── Автосохранение порогов ───
+(function () {
+    var DEBOUNCE = 700;
 
-    <!-- ─── Kronos (только чтение) ─── -->
-    <div class="card">
-        <div class="card-header">🧠 Kronos (ML)</div>
-        <div class="form-group">
-            <label>Модель</label>
-            <input type="text" value="{{ settings.kronos_model }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Устройство</label>
-            <input type="text" value="{{ settings.kronos_device }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Top-p</label>
-            <input type="text" value="{{ settings.kronos_top_p }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Temperature</label>
-            <input type="text" value="{{ settings.kronos_temperature }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Samples</label>
-            <input type="text" value="{{ settings.kronos_sample_count }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Prediction len</label>
-            <input type="text" value="{{ settings.kronos_pred_len }}" disabled>
-        </div>
-    </div>
+    function setStatus(field, kind, html) {
+        var st = field.querySelector('.field-status');
+        field.classList.remove('is-ok', 'is-warn', 'is-err', 'is-saving');
+        if (kind) field.classList.add('is-' + kind);
+        st.className = 'field-status ' + (kind === 'saving' ? 'wait' : (kind || ''));
+        st.innerHTML = html || '';
+        clearTimeout(field._fade);
+        if (kind === 'ok') {
+            field._fade = setTimeout(function () {
+                field.classList.remove('is-ok');
+                st.innerHTML = '';
+            }, 2500);
+        }
+    }
 
-    <!-- ─── Данные (только чтение) ─── -->
-    <div class="card">
-        <div class="card-header">💾 Данные (план 6)</div>
-        <div class="form-group">
-            <label>Kronos context</label>
-            <input type="text" value="{{ settings.data_kronos_context }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Indicator warmup</label>
-            <input type="text" value="{{ settings.data_indicator_warmup }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Live buffer</label>
-            <input type="text" value="{{ settings.data_live_buffer }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Required history</label>
-            <input type="text" value="{{ settings.required_history }}" disabled>
-        </div>
-        <div class="form-group">
-            <label>Retention size</label>
-            <input type="text" value="{{ settings.retention_size }}" disabled>
-            <small class="form-hint">Скользящее окно хранения свечей в БД</small>
-        </div>
-    </div>
+    function updateDerived(key, value) {
+        if (key !== 'margin_of_safety') return;
+        var el = document.getElementById('min-move');
+        var rt = parseFloat(el.getAttribute('data-rt'));
+        el.textContent = ((rt + value) * 100).toFixed(3) + '%';
+    }
 
-    <!-- ─── Монеты ─── -->
-    <div class="card" style="grid-column: span 2;">
-        <div class="card-header">🪙 Монеты по умолчанию</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-            {% for coin in settings.default_coins %}
-            <span class="tag tag-blue">{{ coin }}</span>
-            {% endfor %}
-        </div>
-    </div>
-</div>
+    async function save(input) {
+        var field = input.closest('.field');
+        var raw = input.value.trim().replace(',', '.');
+        if (raw === '' || isNaN(Number(raw))) {
+            setStatus(field, 'err', K.icon('alert', 'icon-sm') + 'Введите число');
+            return;
+        }
+        if (raw === input._saved) return;
+        setStatus(field, 'saving', 'Сохраняю…');
+        var fd = new FormData();
+        fd.append('key', input.dataset.key);
+        fd.append('value', raw);
+        try {
+            var r = await fetch('/api/settings/threshold', { method: 'POST', body: fd });
+            var d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Ошибка');
+            var shown = (input.step === '1') ? String(Math.round(d.value)) : String(+d.value.toPrecision(6));
+            input._saved = shown;
+            updateDerived(d.key, d.value);
+            if (d.clamped) {
+                input.value = shown;
+                setStatus(field, 'warn', K.icon('info', 'icon-sm') + 'Вне диапазона — применено ' + shown);
+            } else {
+                setStatus(field, 'ok', K.icon('check', 'icon-sm') + 'Применено');
+            }
+        } catch (e) {
+            setStatus(field, 'err', K.icon('alert', 'icon-sm') + (e.message || 'Не удалось сохранить'));
+        }
+    }
 
+    document.querySelectorAll('#thresholds-form input[data-key]').forEach(function (input) {
+        input._saved = input.value;
+        input.addEventListener('input', function () {
+            clearTimeout(input._t);
+            input._t = setTimeout(function () { save(input); }, DEBOUNCE);
+        });
+        input.addEventListener('change', function () { clearTimeout(input._t); save(input); });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); clearTimeout(input._t); save(input); }
+        });
+    });
+    document.getElementById('thresholds-form').addEventListener('submit', function (e) { e.preventDefault(); });
+})();
+
+// ─── Авто-торговля Live ───
+(function () {
+    var sw = document.getElementById('live-auto-switch');
+    sw.addEventListener('click', async function () {
+        var enable = !sw.classList.contains('is-on');
+        if (enable) {
+            var ok = await K.confirm({
+                title: 'Разрешить авто-торговлю в Live?',
+                html: 'Система будет сама открывать и закрывать сделки <strong>на реальные деньги</strong> ' +
+                      'по монетам, где включено авто.',
+                ok: 'Разрешить', danger: true,
+            });
+            if (!ok) return;
+        }
+        sw.disabled = true;
+        var fd = new FormData();
+        fd.append('enable', enable ? '1' : '0');
+        try {
+            var r = await fetch('/api/settings/live-auto', { method: 'POST', body: fd });
+            var d = await r.json();
+            sw.classList.toggle('is-on', d.enabled);
+            sw.setAttribute('aria-checked', d.enabled ? 'true' : 'false');
+            K.toast(d.enabled ? 'Авто-торговля в Live разрешена' : 'Авто-торговля в Live выключена', d.enabled ? 'warn' : 'ok');
+        } catch (e) {
+            K.toast('Не удалось изменить настройку', 'err');
+        }
+        sw.disabled = false;
+    });
+})();
+
+// ─── Кошельки: результат HTMX-запросов ───
+document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (!e.detail.target || e.detail.target.id !== 'wallets-card') return;
+    var card = document.getElementById('wallets-card');
+    if (!card) return;
+    if (card.querySelector('[data-wallet-error]')) K.toast('Кошелёк не сохранён', 'err');
+    else K.toast('Кошельки обновлены');
+});
+
+// ─── Подсветка раздела в боковой навигации ───
+(function () {
+    var links = document.querySelectorAll('#settings-nav a');
+    var sections = Array.prototype.map.call(links, function (a) { return document.querySelector(a.getAttribute('href')); });
+    function onScroll() {
+        var y = window.scrollY + 120, current = 0;
+        sections.forEach(function (s, i) { if (s && s.offsetTop <= y) current = i; });
+        if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = sections.length - 1;
+        links.forEach(function (a, i) { a.classList.toggle('active', i === current); });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+})();
+</script>
 {% endblock %}

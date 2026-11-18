@@ -59,7 +59,14 @@ _SYSTEM_PROMPT = (
     "  -0.3..-0.7 = умеренно негативный (регуляторное давление, хаки)\n"
     "  -1.0 = сильно медвежий (взлом, бан, иск SEC, массовый вывод)\n"
     "Если новостей мало — confidence низкий (0.2-0.4).\n"
-    "key_events — ровно 3-5 самых значимых событий из новостей."
+    "key_events — 1-5 самых значимых событий из новостей (сколько реально есть).\n\n"
+    "ВАЖНО:\n"
+    "- Опирайся только на новости из списка, у каждой указана дата. Не выдумывай события.\n"
+    "- Реальная текущая цена и её изменение даны отдельно — это факт. Не называй "
+    "других уровней цены, процентов роста/падения и объёмов, чем в блоке «РЫНОК»: "
+    "цифры в статьях могут относиться к другому моменту.\n"
+    "- Если новости не про эту монету или не дают повода для вывода — sentiment 0, "
+    "confidence 0.1-0.2, и прямо напиши, что значимых новостей нет."
 )
 
 
@@ -250,21 +257,31 @@ class NewsService:
                 sources.extend(s for s in rss_src if s not in sources)
 
         if not news_text:
-            raise NewsError(
-                "Не удалось получить новости из RSS. Проверь подключение к интернету."
+            # Свежих новостей именно по этой монете нет — это нормальная
+            # ситуация, а не ошибка: нейтральный результат без вызова LLM.
+            logger.info("Свежих новостей по %s за %d дн. нет — настроение нейтральное",
+                        coin, days)
+            return NewsResult(
+                sentiment=0.0,
+                summary=f"За последние {days} дня значимых новостей по {coin} не найдено.",
+                confidence=0.0, sources=[], key_events=[],
+                fetched_at=datetime.now(timezone.utc), via_search=via_search,
             )
 
-        # Шаг 3: LLM анализ.
-        prompt = self._build_analysis_prompt(coin, days, news_text)
+        # Шаг 3: LLM анализ (с реальной ценой — чтобы модель не брала цифры
+        # из статей за реальность).
+        market = await _market_context(coin)
+        prompt = self._build_analysis_prompt(coin, days, news_text, market)
 
         if self._provider == "groq":
-            return await self._call_groq(prompt, sources, via_search)
+            result = await self._call_groq(prompt, sources, via_search)
         elif self._provider == "openrouter":
-            return await self._call_openrouter(prompt, sources, via_search)
+            result = await self._call_openrouter(prompt, sources, via_search)
         elif self._provider == "gemini":
-            return await self._call_gemini(prompt, use_search=False)
+            result = await self._call_gemini(prompt, use_search=False)
         else:
             raise NewsError(f"Неизвестный провайдер: {self._provider}")
+        return _drop_wrong_prices(result, market.get("price") if market else None, coin)
 
     # ─── Tavily Search ────────────────────────────────────────
 
@@ -277,16 +294,17 @@ class NewsService:
         """
         session = await self._get_session()
         coin_name = _CT_TAG_MAP.get(coin, coin.lower())
-        query = (
-            f"latest {coin} {coin_name} cryptocurrency news price "
-            f"sentiment analysis last {days} days"
-        )
+        query = f"{coin_name.replace('-', ' ')} {coin} crypto news"
 
+        # topic="news" обязателен: в общем режиме (по умолчанию) Tavily
+        # игнорирует "days" и отдаёт статьи любого возраста — так в «свежие
+        # новости за 3 дня» попадали статьи 2025 года с ценами того времени.
         payload = {
             "api_key": settings.tavily_api_key,
             "query": query,
+            "topic": "news",
             "search_depth": "basic",
-            "max_results": 8,
+            "max_results": 10,
             "include_answer": False,
             "include_raw_content": False,
             "days": days,
@@ -323,22 +341,27 @@ class NewsService:
         if not results:
             return "", []
 
-        lines: list[str] = []
-        sources: list[str] = []
-        for i, r in enumerate(results, 1):
-            title = r.get("title", "").strip()
-            content = r.get("content", "").strip()
-            url = r.get("url", "").strip()
-            score = r.get("score", 0)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        items: list[tuple[str, str, str, datetime | None]] = []
+        dropped_old = dropped_other = 0
+        for r in results:
+            title = (r.get("title") or "").strip()
+            content = (r.get("content") or "").strip()
+            url = (r.get("url") or "").strip()
             if not title:
                 continue
-            lines.append(f"{i}. {title} (релевантность: {score:.2f})")
-            if content:
-                lines.append(f"   {content[:350]}")
-            if url:
-                sources.append(url)
-
-        return "\n".join(lines), sources
+            published = _parse_any_date(r.get("published_date")) or _date_from_url(url)
+            if published is None or published < cutoff:
+                dropped_old += 1
+                continue
+            if not _mentions_coin(f"{title} {content}", coin):
+                dropped_other += 1
+                continue
+            items.append((title, content, url, published))
+        if dropped_old or dropped_other:
+            logger.info("Tavily %s: отброшено старых/без даты %d, не про монету %d, осталось %d",
+                        coin, dropped_old, dropped_other, len(items))
+        return _format_items(items)
 
     # ─── Groq LLM (1000+ req/день, Qwen 27B / GPT-OSS) ────────
 
@@ -380,6 +403,7 @@ class NewsService:
             "max_tokens": 600,
             "top_p": 0.95,
         }
+        _apply_groq_reasoning(payload)
 
         headers = {
             "Authorization": f"Bearer {settings.groq_api_key}",
@@ -407,6 +431,7 @@ class NewsService:
                         tried.add(fb)
                         logger.info("Статус %d на Groq (%s), пробую fallback: %s", resp.status, payload["model"], fb)
                         payload["model"] = fb
+                        _apply_groq_reasoning(payload)
                         async with session.post(
                             "https://api.groq.com/openai/v1/chat/completions",
                             **kwargs,
@@ -724,13 +749,26 @@ class NewsService:
         )
 
     @staticmethod
-    def _build_analysis_prompt(coin: str, days: int, news_text: str) -> str:
+    def _build_analysis_prompt(
+        coin: str, days: int, news_text: str, market: dict | None = None,
+    ) -> str:
         """Промпт для анализа уже собранных новостей (Tavily или RSS)."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if market:
+            parts = [f"текущая цена {coin}: ${_fmt_price(market['price'])}"]
+            for label, key in (("24 ч", "ch24"), ("3 дня", "ch72"), ("7 дней", "ch168")):
+                if market.get(key) is not None:
+                    parts.append(f"за {label}: {market[key]:+.1f}%")
+            market_line = "РЫНОК (факт, Binance): " + ", ".join(parts) + "\n\n"
+        else:
+            market_line = ""
         return (
-            f"Ниже — свежие новости по криптовалюте {coin} за последние {days} дня. "
-            f"Проанализируй их глубоко: оцени влияние на цену, объёмы, "
-            f"регуляторные риски, sentiment рынка. Перечисли 3-5 ключевых событий. "
+            f"Сегодня {today} (UTC). Ниже — новости по криптовалюте {coin} "
+            f"за последние {days} дня, у каждой указана дата публикации. "
+            f"Оцени их влияние на настроение рынка по {coin}: события сети, "
+            f"листинги, регуляторные риски, движения капитала. "
             f"Дай ответ в формате JSON.\n\n"
+            f"{market_line}"
             f"НОВОСТИ:\n{news_text}"
         )
 
@@ -794,6 +832,7 @@ class NewsService:
             "https://bitcoinist.com/feed/",
         ]
         items: list[tuple[str, str, str, datetime | None]] = []
+        tag_feed = feeds[0]
         for feed_url in feeds:
             try:
                 timeout = aiohttp.ClientTimeout(total=10, connect=8)
@@ -830,7 +869,12 @@ class NewsService:
                     pub_dt = _parse_rss_date(pub.group(1).strip()) if pub else None
                     if not t:
                         continue
-                    if pub_dt and pub_dt < cutoff:
+                    if pub_dt is None or pub_dt < cutoff:
+                        continue
+                    # Общие ленты (не тег монеты) — только статьи, где монета
+                    # упомянута. Раньше этот фильтр не срабатывал никогда, и в
+                    # «новости по DOT» попадали общие новости рынка.
+                    if feed_url != tag_feed and not _mentions_coin(f"{t} {d_clean}", coin):
                         continue
                     items.append((t, d_clean, l, pub_dt))
             except Exception:
@@ -839,29 +883,16 @@ class NewsService:
             if len(items) >= 15:
                 break
 
-        # Дедуп по заголовку + фильтр по упоминанию монеты в общих фидах.
+        # Дедуп по заголовку.
         seen: set[str] = set()
-        unique: list[tuple[str, str, str]] = []
-        for t, d, l, _dt in items:
+        unique: list[tuple[str, str, str, datetime | None]] = []
+        for t, d, l, dt in items:
             key = t.lower()[:60]
             if key in seen:
                 continue
             seen.add(key)
-            unique.append((t, d, l))
-        is_tag_feed = f"/tag/{ct_tag}" in feeds[0]
-        if not is_tag_feed:
-            unique = [it for it in unique if coin_lower in it[0].lower()]
-        unique = unique[:12]
-
-        lines: list[str] = []
-        sources: list[str] = []
-        for i, (t, d, l) in enumerate(unique, 1):
-            lines.append(f"{i}. {t}")
-            if d and len(d) > 20:
-                lines.append(f"   {d[:350]}")
-            if l:
-                sources.append(l)
-        return "\n".join(lines), sources
+            unique.append((t, d, l, dt))
+        return _format_items(unique[:12])
 
     # ─── Утилиты ─────────────────────────────────────────────
 
@@ -875,6 +906,22 @@ class _QuotaExceeded(Exception):
 
 
 # ─── JSON extraction (общая утилита) ────────────────────────
+
+def _apply_groq_reasoning(payload: dict) -> None:
+    """Отключить/урезать «размышления» у reasoning-моделей Groq.
+
+    qwen3.8 по умолчанию думает (reasoning_effort="default"): размышления
+    съедают лимит токенов (free: ~8K TPM / 200K TPD) и при max_tokens=600
+    обрезают JSON. Для qwen — режим instruct ("none"), для gpt-oss — "low"
+    (у gpt-oss значения "none" нет).
+    """
+    model = str(payload.get("model", ""))
+    payload.pop("reasoning_effort", None)
+    if model.startswith("qwen/"):
+        payload["reasoning_effort"] = "none"
+    elif model.startswith("openai/gpt-oss"):
+        payload["reasoning_effort"] = "low"
+
 
 def _extract_json(text: str) -> dict | None:
     """Найти первый JSON-объект в тексте и распарсить."""
@@ -936,6 +983,150 @@ def _repair_json(text: str) -> dict | None:
         return json.loads(repaired)
     except json.JSONDecodeError:
         return None
+
+
+# Дополнительные названия монет для проверки «статья про эту монету».
+_EXTRA_NAMES: dict[str, list[str]] = {
+    "ATOM": ["cosmos hub"], "POL": ["matic"], "BNB": ["binance coin", "bnb chain"],
+    "NEAR": ["near protocol"], "TON": ["the open network"],
+}
+
+
+def _mentions_coin(text: str, coin: str) -> bool:
+    """Статья действительно про монету: тикер (как слово) или её название.
+
+    Тикер ищется с учётом регистра и границ слова: иначе «DOT» находился бы
+    в «dot-com», «ATOM» — в «atomic», «OP» — где угодно.
+    """
+    name = _CT_TAG_MAP.get(coin, coin.lower()).replace("-", " ")
+    low = text.lower()
+    names = [name, *_EXTRA_NAMES.get(coin, [])]
+    if any(re.search(rf"\b{re.escape(n)}\b", low) for n in names if len(n) > 3):
+        return True
+    return re.search(rf"(?<![A-Za-z]){re.escape(coin)}(?![A-Za-z])", text) is not None
+
+
+def _parse_any_date(value) -> datetime | None:
+    """Дата из ответа Tavily (RFC 2822 или ISO) → aware UTC."""
+    if not value:
+        return None
+    text = str(value).strip()
+    dt = _parse_rss_date(text)
+    if dt is None:
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _date_from_url(url: str) -> datetime | None:
+    """Дата из URL вида …/2025/12/23/… (coindesk и др.) — страховка, если
+    у результата нет published_date."""
+    m = re.search(r"/(20\d\d)/(\d\d)/(\d\d)/", url or "")
+    if not m:
+        return None
+    try:
+        return datetime(int(m[1]), int(m[2]), int(m[3]), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _format_items(items: list[tuple[str, str, str, datetime | None]]) -> tuple[str, list[str]]:
+    """Список новостей для LLM: каждая с датой публикации (UTC)."""
+    items = sorted(items, key=lambda it: it[3] or datetime.min.replace(tzinfo=timezone.utc),
+                   reverse=True)
+    lines: list[str] = []
+    sources: list[str] = []
+    for i, (title, desc, url, published) in enumerate(items, 1):
+        date = published.strftime("%Y-%m-%d %H:%M") if published else "дата неизвестна"
+        lines.append(f"{i}. [{date} UTC] {title}")
+        if desc and len(desc) > 20:
+            lines.append(f"   {desc[:350]}")
+        if url and url not in sources:
+            sources.append(url)
+    return "\n".join(lines), sources
+
+
+def _fmt_price(p: float) -> str:
+    return f"{p:,.2f}" if p >= 100 else (f"{p:.4f}" if p >= 1 else f"{p:.5f}")
+
+
+async def _market_context(coin: str) -> dict | None:
+    """Реальная цена и её изменение за 24 ч / 3 дня / 7 дней из свечей 1h в БД."""
+    try:
+        from sqlalchemy import select
+
+        from db.database import get_session
+        from db.models import Candle, Coin
+
+        async with get_session() as db:
+            coin_row = (await db.execute(
+                select(Coin).where(Coin.symbol == f"{coin}/USDT")
+            )).scalar_one_or_none()
+            if coin_row is None:
+                return None
+            rows = (await db.execute(
+                select(Candle.close)
+                .where(Candle.coin_id == coin_row.id, Candle.tf == "1h")
+                .order_by(Candle.timestamp.desc())
+                .limit(169)
+            )).scalars().all()
+        if not rows:
+            return None
+        price = float(rows[0])
+        ctx: dict = {"price": price}
+        for key, h in (("ch24", 24), ("ch72", 72), ("ch168", 168)):
+            ctx[key] = (price / float(rows[h]) - 1) * 100 if len(rows) > h and rows[h] else None
+        return ctx
+    except Exception as exc:
+        logger.debug("Нет рыночного контекста для %s: %s", coin, exc)
+        return None
+
+
+_PRICE_RE = re.compile(r"\$\s?(\d[\d,\s]*(?:[.,]\d+)?)")
+
+
+def _has_wrong_price(text: str, price: float) -> bool:
+    """В тексте есть цена в $, отличающаяся от реальной больше чем в 1.5 раза."""
+    for m in _PRICE_RE.finditer(text):
+        raw = m.group(1).replace(" ", "").replace("\u202f", "")
+        if raw.count(",") and raw.count("."):
+            raw = raw.replace(",", "")
+        else:
+            raw = raw.replace(",", ".")
+        try:
+            v = float(raw)
+        except ValueError:
+            continue
+        # Крупные суммы ($2.31 млн, $500M) — это объёмы, а не цена монеты.
+        tail = text[m.end():m.end() + 6].lower()
+        if any(w in tail for w in ("млн", "млрд", "тыс", "m ", "b ", "k ", "mln", "bn")):
+            continue
+        if v > 0 and not (price / 1.5 <= v <= price * 1.5):
+            return True
+    return False
+
+
+def _drop_wrong_prices(result: "NewsResult | None", price: float | None, coin: str):
+    """Убрать из сводки фразы с ценами, не совпадающими с реальной.
+
+    Страховка на случай, если модель всё-таки взяла цифры из статей.
+    """
+    if result is None or not price:
+        return result
+    sentences = re.split(r"(?<=[.!?])\s+", result.summary)
+    kept = [s for s in sentences if not _has_wrong_price(s, price)]
+    events = [e for e in result.key_events if not _has_wrong_price(e, price)]
+    removed = (len(sentences) - len(kept)) + (len(result.key_events) - len(events))
+    if removed:
+        logger.warning("Новости %s: убрано %d фраз с ценой, не совпадающей с реальной ($%s)",
+                       coin, removed, _fmt_price(price))
+        result.summary = " ".join(kept) or "Новости проанализированы."
+        result.key_events = events
+    return result
 
 
 def _parse_rss_date(date_str: str) -> datetime | None:

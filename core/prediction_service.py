@@ -87,9 +87,16 @@ class PredictionService:
         from kronos import Kronos, KronosPredictor, KronosTokenizer
 
         device = settings.kronos_device
-        if device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA недоступна — переключение на CPU")
-            device = "cpu"
+        if device == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA/GPU недоступна! Проект настроен строго на работу с видеокартой (NVIDIA). "
+                    "Убедитесь, что драйвер NVIDIA активен и PyTorch собран с поддержкой CUDA."
+                )
+            device = "cuda:0"
+            gpu_name = torch.cuda.get_device_name(0)
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            logger.info("Работа Kronos строго на GPU: %s (VRAM: %.2f GB)", gpu_name, vram_gb)
 
         t0 = time.time()
         logger.info(
@@ -100,6 +107,7 @@ class PredictionService:
         model = Kronos.from_pretrained(settings.kronos_model)
         self._predictor = KronosPredictor(
             model, tokenizer,
+            device=device,
             max_context=settings.data_kronos_context,
         )
         elapsed = time.time() - t0
@@ -108,6 +116,17 @@ class PredictionService:
     @property
     def is_loaded(self) -> bool:
         return self._predictor is not None
+
+    def get_context_size(self, timeframe: str) -> int:
+        """Определяет оптимальный размер окна контекста свечей для таймфрейма:
+        - 4h: 256 свечей (~42.6 дня) — захватывает полный среднесрочный цикл и уровни,
+              но отсекает устаревший рыночный режим 2-3 месячной давности.
+        - 1h: 512 свечей (~21.3 дня) — оптимально покрывает 3 полных недельных цикла.
+        - остальные: settings.data_kronos_context.
+        """
+        if timeframe == "4h":
+            return min(256, settings.data_kronos_context)
+        return settings.data_kronos_context
 
     # ─── Прогноз ─────────────────────────────────────────────
 
@@ -131,10 +150,11 @@ class PredictionService:
             self.load()
 
         horizon = horizon or settings.kronos_pred_len
-        if len(candles) < settings.data_kronos_context:
+        target_context = self.get_context_size(timeframe)
+        min_context = min(120 if timeframe == "4h" else 200, target_context)
+        if len(candles) < min_context:
             raise ValueError(
-                f"Недостаточно свечей для Kronos: {len(candles)} < "
-                f"{settings.data_kronos_context}"
+                f"Недостаточно свечей для Kronos ({timeframe}): {len(candles)} < {min_context}"
             )
 
         # Кэш: ключ = (symbol, tf, timestamp последней свечи контекста).
@@ -162,8 +182,8 @@ class PredictionService:
         horizon: int,
     ) -> PredictionResult:
         """Непосредственно вызов KronosPredictor.predict."""
-        # Берём последние kronos_context свечей как контекст.
-        ctx_size = settings.data_kronos_context
+        # Берём последние свечи согласно адаптивному контексту таймфрейма.
+        ctx_size = self.get_context_size(timeframe)
         context = candles[-ctx_size:]
 
         # Готовим DataFrame в формате Kronos.
@@ -218,7 +238,10 @@ class PredictionService:
             pred_path_slope=pred_path_slope,
             inference_ms=inference_ms,
         )
-        logger.info(
+        # Прогнозы на 1 свечу делает mini_backtest пачками по 16 штук —
+        # в основной лог их не пишем, иначе они его забивают.
+        logger.log(
+            logging.DEBUG if horizon == 1 else logging.INFO,
             "Прогноз %s %s: return=%.2f%% max_high=%.2f slope=%.5f (%.0f мс)",
             symbol, timeframe, pred_return * 100, pred_max_high,
             pred_path_slope, inference_ms,
@@ -254,13 +277,14 @@ class PredictionService:
         if not self.is_loaded:
             self.load()
 
-        ctx_size = settings.data_kronos_context
-        # Нужно минимум ctx_size свечей до первой проверяемой + steps проверяемых.
-        min_needed = ctx_size + steps
+        ctx_size = self.get_context_size(timeframe)
+        min_context = min(120 if timeframe == "4h" else 200, ctx_size)
+        # Нужно минимум min_context свечей до первой проверяемой + steps проверяемых.
+        min_needed = min_context + steps
         if len(candles) < min_needed:
             logger.warning(
-                "mini_backtest %s: мало свечей %d < %d",
-                symbol, len(candles), min_needed,
+                "mini_backtest %s (%s): мало свечей %d < %d",
+                symbol, timeframe, len(candles), min_needed,
             )
             return []
 
@@ -279,7 +303,7 @@ class PredictionService:
             check_idx = len(candles) - steps + i
             context = candles[max(0, check_idx - ctx_size):check_idx]
             actual_candle = candles[check_idx]
-            if len(context) < ctx_size:
+            if len(context) < min_context:
                 continue
 
             # Прогноз 1 свечи вперёд (кешируется внутри predict).

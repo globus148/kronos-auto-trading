@@ -1,0 +1,92 @@
+<script>
+// ─── Закрытие и изменение позиций (общие для дашборда и страницы монеты) ───
+var _closePosId = null;
+var _editPosId = null;
+
+function confirmClosePos(posId, symbol, side, entryPrice, qty) {
+    _closePosId = posId;
+    var pnlEl = document.getElementById('close-modal-pnl');
+    var detail = document.getElementById('close-modal-detail');
+    var ok = document.getElementById('close-modal-ok');
+    document.getElementById('close-modal-title').textContent =
+        'Закрыть ' + (side === 'short' ? 'SHORT' : 'LONG') + ' ' + symbol + ' #' + posId;
+    detail.textContent = 'Вход ' + K.pricefmt(entryPrice) + ' · Кол-во ' + qty.toFixed(6);
+    pnlEl.textContent = '…';
+    pnlEl.style.color = 'var(--text-3)';
+    ok.disabled = false;
+    K.openModal('close-modal');
+
+    fetch('/api/position-pnl?id=' + posId, { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var pnl = data.pnl || 0;
+            var price = data.price || entryPrice;
+            pnlEl.textContent = (pnl >= 0 ? '+' : '−') + '$' + Math.abs(pnl).toFixed(2);
+            pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+            detail.textContent = 'Вход ' + K.pricefmt(entryPrice) + ' · Сейчас ' + K.pricefmt(price) +
+                ' · Кол-во ' + qty.toFixed(6);
+        })
+        .catch(function () { pnlEl.textContent = 'Цена недоступна'; });
+}
+
+function doClosePos() {
+    if (!_closePosId) return;
+    var ok = document.getElementById('close-modal-ok');
+    ok.disabled = true;
+    ok.textContent = 'Закрытие…';
+    fetch('/positions/' + _closePosId + '/close', { method: 'POST' })
+        .then(function (r) { return r.text(); })
+        .then(function () { window.location.reload(); })
+        .catch(function () {
+            ok.disabled = false;
+            ok.textContent = 'Закрыть по рынку';
+            K.toast('Не удалось закрыть позицию', 'err');
+        });
+}
+
+function openEditModal(posId, side, entryPrice, stopPrice, targetPrice) {
+    _editPosId = posId;
+    var isShort = side === 'short';
+    document.getElementById('edit-modal-title').innerHTML = 'Позиция #' + posId +
+        ' <span class="tag ' + (isShort ? 'tag-red' : 'tag-green') + '" style="margin-left:6px;">' +
+        (isShort ? 'SHORT' : 'LONG') + '</span>';
+    document.getElementById('edit-modal-detail').textContent = 'Цена входа ' + K.pricefmt(entryPrice);
+    var stopInput = document.getElementById('edit-stop');
+    var targetInput = document.getElementById('edit-target');
+    stopInput.value = stopPrice > 0 ? K.pricefmtRaw(stopPrice) : '';
+    targetInput.value = targetPrice > 0 ? K.pricefmtRaw(targetPrice) : '';
+    document.getElementById('edit-stop-hint').textContent =
+        (isShort ? 'Выше' : 'Ниже') + ' цены входа';
+    document.getElementById('edit-target-hint').textContent =
+        (isShort ? 'Ниже' : 'Выше') + ' цены входа';
+    document.getElementById('edit-modal-result').innerHTML = '';
+    K.openModal('edit-modal');
+    setTimeout(function () { stopInput.focus(); }, 30);
+}
+
+function doEditPos() {
+    if (!_editPosId) return;
+    var resultEl = document.getElementById('edit-modal-result');
+    var fd = new FormData();
+    var s = document.getElementById('edit-stop').value;
+    var t = document.getElementById('edit-target').value;
+    if (s !== '') fd.append('stop_price', s);
+    if (t !== '') fd.append('target_price', t);
+    resultEl.innerHTML = '<span class="faint">Сохранение…</span>';
+    fetch('/positions/' + _editPosId + '/edit', { method: 'POST', body: fd })
+        .then(function (r) { return r.text().then(function (html) { return { ok: r.ok, html: html }; }); })
+        .then(function (data) {
+            resultEl.innerHTML = data.html;
+            if (data.ok) {
+                K.toast('Стоп и тейк обновлены');
+                setTimeout(function () { window.location.reload(); }, 600);
+            }
+        })
+        .catch(function () { resultEl.innerHTML = '<span class="neg">Нет связи с сервером</span>'; });
+}
+
+document.addEventListener('keydown', function (e) {
+    var m = document.getElementById('edit-modal');
+    if (e.key === 'Enter' && m && m.classList.contains('open')) doEditPos();
+});
+</script>

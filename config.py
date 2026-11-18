@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from functools import lru_cache
 from typing import Literal
 
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
     """Все настройки приложения. Значения по умолчанию совпадают с планом.md."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parent / ".env",  # не зависит от папки запуска
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -57,10 +59,10 @@ class Settings(BaseSettings):
     kronos_model: str = "NeoQuasar/Kronos-base"
     kronos_tokenizer: str = "NeoQuasar/Kronos-Tokenizer-base"
     kronos_device: Literal["cuda", "cpu"] = "cuda"
-    kronos_top_p: float = 0.95
-    kronos_temperature: float = 1.2
-    kronos_sample_count: int = 3
-    kronos_pred_len: int = 8
+    kronos_top_p: float = 0.9
+    kronos_temperature: float = 0.6   # низкая T → меньше шума, путь ближе к наиболее вероятному
+    kronos_sample_count: int = 8    # 5–10 прогонов, усредняются
+    kronos_pred_len: int = 12       # 1h → 12ч, 4h → 2 дня
 
     # ─── Новости (сентимент через LLM + поиск) ───
     # Провайдер: "groq" (1000/день, дефолт), "openrouter" (50/день), "gemini" (legacy).
@@ -99,6 +101,10 @@ class Settings(BaseSettings):
     atr_k_take: float = 3.0
     max_position_pct: float = 0.30
     max_hold_periods: int = 48
+    # Учитывать ли прогноз Kronos в торговом сигнале (1 — да, 0 — нет).
+    # При 0 прогноз по-прежнему считается и показывается на дашборде, но не
+    # влияет на вход/выход (меняется на странице /settings).
+    kronos_in_signal: int = 1
     # Фильтры входа (план 4.3) — настраиваемые для тестирования.
     strategy_min_rr: float = 1.5            # минимальный Risk/Reward
     strategy_min_adx: float = 15.0          # минимальный ADX (сила тренда)

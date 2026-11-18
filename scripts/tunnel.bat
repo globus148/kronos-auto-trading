@@ -2,6 +2,9 @@
 chcp 65001 >nul
 title Kronos Trading + Remote Tunnel
 
+:: Скрипт лежит в scripts\, работаем из корня проекта.
+cd /d "%~dp0.."
+
 echo ============================================================
 echo   Kronos Auto-Trading + Remote Tunnel
 echo ============================================================
@@ -16,24 +19,29 @@ if not exist .env (
     echo [OK] Создан .env из .env.example
 )
 
-:: Проверяем Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ОШИБКА] Python не найден. Установи Python 3.10+ и перезапусти.
-    pause
-    exit /b 1
+:: Python: сначала venv проекта, иначе системный
+set "PY=%CD%\venv\Scripts\python.exe"
+if not exist "%PY%" (
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo [ОШИБКА] Python не найден. Установи Python 3.10+ и перезапусти.
+        pause
+        exit /b 1
+    )
+    set "PY=python"
 )
 
 :: Проверяем зависимости
-pip show fastapi >nul 2>&1
+"%PY%" -c "import fastapi" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Установка зависимостей...
-    pip install -r requirements.txt
+    "%PY%" -m pip install -r requirements.txt
 )
 
 :: Запуск бота в фоне
 echo [1/2] Запуск бота на порту 8000...
-start /b "" python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > trading.log 2>&1
+if not exist logs mkdir logs
+start /b "" "%PY%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > logs\tunnel_server.log 2>&1
 
 :: Ждём загрузку (Kronos грузится ~10 сек)
 echo [INFO] Ожидание загрузки бота...
@@ -42,7 +50,7 @@ timeout /t 12 /nobreak >nul
 :: Проверяем что бот поднялся
 curl -s -o nul http://127.0.0.1:8000/api/health >nul 2>&1
 if errorlevel 1 (
-    echo [ОШИБКА] Бот не запустился! Проверь trading.log
+    echo [ОШИБКА] Бот не запустился! Проверь logs\tunnel_server.log
     pause
     exit /b 1
 )

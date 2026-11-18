@@ -1,0 +1,63 @@
+{# Общие макросы интерфейса. Подключение: {% import "_ui.html" as ui %} #}
+
+{% macro icon(name, cls="") -%}
+<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{# Состояние шкалы S_entry: idle / below / pass + направление long/short. #}
+{% macro meter_state(value, thr, direction) -%}
+{%- set side = 'is-short' if direction == 'down' else 'is-long' -%}
+{%- if value is none -%}is-idle {{ side }}
+{%- elif value >= thr -%}is-pass {{ side }}
+{%- else -%}is-below {{ side }}{%- endif -%}
+{%- endmacro %}
+
+{# Шкала S_entry 0..1 с вертикальной отметкой порога входа. #}
+{% macro meter(value, thr, direction, size="", tf="") -%}
+<div class="meter {{ size }} {{ meter_state(value, thr, direction) }}"{% if tf %} data-tf="{{ tf }}"{% endif %}
+     title="S_entry {{ '%.3f'|format(value) if value is not none else '—' }} · порог {{ '%.2f'|format(thr) }}">
+    <div class="meter-track">
+        <div class="meter-fill" style="width: {{ ((value or 0) * 100)|round(1) }}%;"></div>
+    </div>
+    <div class="meter-mark" style="left: {{ (thr * 100)|round(1) }}%;"></div>
+</div>
+{%- endmacro %}
+
+{# Значение S_entry рядом со шкалой. #}
+{% macro sval(value, thr, direction, tf="") -%}
+<span class="sval {{ meter_state(value, thr, direction) }}"{% if tf %} data-tf="{{ tf }}"{% endif %}>{{ '%.2f'|format(value) if value is not none else '—' }}</span>
+{%- endmacro %}
+
+{# Направление прогноза и вероятность. #}
+{% macro dir(direction, prob, tf="") -%}
+<span class="dir {% if prob is none %}{% elif direction == 'down' %}down{% else %}up{% endif %}"{% if tf %} data-tf="{{ tf }}"{% endif %}>
+{%- if prob is not none -%}
+{{ icon('arrow-down' if direction == 'down' else 'arrow-up') }}{{ (prob * 100)|round|int }}%
+{%- endif -%}
+</span>
+{%- endmacro %}
+
+{# Переключатель авто-торговли (тот же HTML отдаёт сервер после клика). #}
+{% macro auto_switch(symbol, encoded, tf, enabled) -%}
+<button type="button" class="switch auto-btn{% if enabled %} is-on{% endif %}"
+        role="switch" aria-checked="{{ 'true' if enabled else 'false' }}"
+        data-sym="{{ symbol }}" data-tf="{{ tf }}"
+        hx-post="/coin/{{ encoded }}/auto?tf={{ tf }}" hx-target="this" hx-swap="outerHTML"
+        title="Авто-торговля {{ tf }}: {{ 'включена' if enabled else 'выключена' }}"></button>
+{%- endmacro %}
+
+{# Символ пары: BTC/USDT → BTC + /USDT приглушённо. #}
+{% macro pair(symbol) -%}
+{%- set parts = symbol.split('/') -%}
+{{ parts[0] }}{% if parts|length > 1 %}<span class="quote">/{{ parts[1] }}</span>{% endif %}
+{%- endmacro %}
+
+{# Сентимент новостей: −1..1. #}
+{% macro news_badge(s) -%}
+{%- if s > 0.3 %}{% set t, c = 'Бычий', 'tag-green' %}
+{%- elif s > 0.05 %}{% set t, c = 'Слабо бычий', 'tag-green' %}
+{%- elif s < -0.3 %}{% set t, c = 'Медвежий', 'tag-red' %}
+{%- elif s < -0.05 %}{% set t, c = 'Слабо медвежий', 'tag-red' %}
+{%- else %}{% set t, c = 'Нейтральный', '' %}{% endif -%}
+<span class="tag tag-dot {{ c }}">{{ t }} · {{ '%.0f'|format((s * 100)|abs) }}%</span>
+{%- endmacro %}

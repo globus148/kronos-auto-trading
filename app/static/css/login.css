@@ -1,113 +1,59 @@
-/* Kronos Trading — страница входа */
-
+/* Kronos — страница входа */
 :root {
-    --bg: #121318;
-    --surface: #1b1c22;
-    --surface2: #262830;
-    --border: #353841;
-    --text: #f0f0f3;
-    --text-dim: #9ca0aa;
-    --accent: #4a9eff;
-    --accent2: #74b9ff;
-    --red: #ff6b6b;
-    --radius: 10px;
+    --bg: #0d0e11;
+    --surface: #14161a;
+    --border: #23272e;
+    --border-2: #2f343d;
+    --text: #e7e9ec;
+    --text-2: #a0a6b0;
+    --text-3: #6d7380;
+    --accent: #7b8cff;
+    --accent-2: #9aa7ff;
+    --accent-bg: rgba(123, 140, 255, 0.12);
+    --red: #f0626e;
 }
-
 * { margin: 0; padding: 0; box-sizing: border-box; }
-
+html { color-scheme: dark; }
 body {
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    min-height: 100vh; display: grid; place-items: center; padding: 20px;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 14px;
+    background: radial-gradient(1200px 600px at 50% -10%, rgba(123,140,255,0.08), transparent 60%), var(--bg);
+    color: var(--text); -webkit-font-smoothing: antialiased;
 }
-
-.login-wrapper {
-    width: 100%;
-    max-width: 380px;
+.login { width: 100%; max-width: 360px; }
+.login-brand {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    font-weight: 600; font-size: 16px; margin-bottom: 20px;
 }
-
+.login-mark {
+    width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+    background: var(--accent-bg); color: var(--accent);
+}
+.login-mark svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .login-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 40px 32px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px 26px;
 }
-
-.login-logo {
-    font-size: 1.4em;
-    font-weight: 700;
-    color: var(--accent2);
-    margin-bottom: 24px;
-    text-align: center;
-}
-
-.login-card h1 {
-    font-size: 1.5em;
-    font-weight: 600;
-    margin-bottom: 24px;
-    text-align: center;
-}
-
+.login-card h1 { font-size: 18px; font-weight: 600; }
+.login-sub { color: var(--text-2); font-size: 13px; margin: 4px 0 20px; }
 .login-error {
-    background: rgba(255, 107, 107, 0.12);
-    color: var(--red);
-    border: 1px solid rgba(255, 107, 107, 0.3);
-    border-radius: var(--radius);
-    padding: 10px 14px;
-    margin-bottom: 20px;
-    font-size: 0.9em;
-    text-align: center;
+    background: rgba(240, 98, 110, 0.12); color: #f4b3b8;
+    border: 1px solid rgba(240, 98, 110, 0.25); border-radius: 9px;
+    padding: 10px 12px; margin-bottom: 16px; font-size: 13px;
 }
-
-.form-group {
-    margin-bottom: 20px;
+label { display: block; font-size: 12.5px; color: var(--text-2); font-weight: 500; margin-bottom: 6px; }
+input {
+    width: 100%; height: 40px; padding: 0 12px;
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border-2); border-radius: 8px;
+    transition: border-color .15s, box-shadow .15s;
 }
-
-.form-group label {
-    display: block;
-    font-size: 0.85em;
-    color: var(--text-dim);
-    margin-bottom: 6px;
+input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+button {
+    width: 100%; height: 40px; margin-top: 16px;
+    font: inherit; font-weight: 600; color: #0d0e11;
+    background: var(--accent); border: 0; border-radius: 8px; cursor: pointer;
+    transition: background .15s;
 }
-
-.form-group input {
-    width: 100%;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface2);
-    color: var(--text);
-    font-size: 1em;
-    transition: border-color 0.2s;
-}
-
-.form-group input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.login-btn {
-    width: 100%;
-    padding: 12px;
-    border: none;
-    border-radius: var(--radius);
-    background: var(--accent);
-    color: white;
-    font-size: 1em;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.login-btn:hover {
-    background: var(--accent2);
-}
-
-.login-btn:active {
-    transform: scale(0.98);
-}
+button:hover { background: var(--accent-2); }
+button:active { transform: translateY(1px); }

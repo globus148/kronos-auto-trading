@@ -45,6 +45,40 @@ def _decode_symbol(encoded: str) -> str:
     return encoded.replace("-", "/")
 
 
+# ─── S_entry для шкал UI ───────────────────────────────────────
+
+def _sentry_view(sig: dict) -> tuple[float | None, str | None]:
+    """S_entry, который показывает шкала, и направление прогноза.
+
+    При прогнозе падения шкала показывает SHORT-сигнал (s_entry_short),
+    иначе — LONG (s_entry). Нет сигнала по ТФ → (None, None).
+    """
+    if not sig:
+        return None, None
+    direction = sig.get("direction") or "up"
+    if direction == "down" and sig.get("s_entry_short") is not None:
+        return sig.get("s_entry_short"), direction
+    return sig.get("s_entry"), direction
+
+
+def _coin_tf_fields(sig: dict, tf: str) -> dict:
+    """Поля одной ячейки ТФ строки монеты на дашборде."""
+    sentry, direction = _sentry_view(sig)
+    return {
+        f"sentry_{tf}": sentry,
+        f"direction_{tf}": direction,
+        f"win_prob_{tf}": sig.get("win_prob") if sig else None,
+        f"pred_return_{tf}": sig.get("pred_return") if sig else None,
+        f"updated_{tf}": sig.get("updated_at") if sig else None,
+    }
+
+
+async def _live_thresholds() -> dict[str, float]:
+    """Текущие пороги стратегии (из БД/кеша), а не дефолты из .env."""
+    from core.strategy_config import get_thresholds
+    return await get_thresholds()
+
+
 # ─── Экран выбора режима ─────────────────────────────────────
 
 @router.get("/")
@@ -96,18 +130,26 @@ async def dashboard(request: Request) -> HTMLResponse:
     # Данные для Plotly: drawdown.
     dd_y = _drawdown_series(eq_y) if len(eq_y) > 1 else []
 
-    # Монеты с текущими ценами и статусами auto.
+    # Монеты с текущими ценами, статусами auto и кэшированными сигналами/прогнозами.
+    loop = get_loop()
     coin_data = []
     for coin in coins:
+        s4 = loop.get_last_signal(coin.symbol, "4h") or {}
+        s1 = loop.get_last_signal(coin.symbol, "1h") or {}
         coin_data.append({
             "symbol": coin.symbol,
             "encoded": _encode_symbol(coin.symbol),
             "default_tf": coin.default_tf,
-            "auto_4h": get_loop().is_auto(coin.symbol, "4h"),
-            "auto_1h": get_loop().is_auto(coin.symbol, "1h"),
+            "auto_4h": loop.is_auto(coin.symbol, "4h"),
+            "auto_1h": loop.is_auto(coin.symbol, "1h"),
+            **_coin_tf_fields(s4, "4h"),
+            **_coin_tf_fields(s1, "1h"),
         })
 
+    thresholds = await _live_thresholds()
+
     return TEMPLATES.TemplateResponse("dashboard.html", {
+        "entry_threshold": thresholds["entry_threshold"],
         "request": request,
         "session": session,
         "report": report,
@@ -118,6 +160,7 @@ async def dashboard(request: Request) -> HTMLResponse:
         "dd_y": dd_y,
         "last_equity": eq_y[-1] if eq_y else 100.0,
         "initial_equity": session.initial_balance,
+        "is_refreshing": loop.is_refreshing,
     })
 
 
@@ -209,26 +252,32 @@ async def coin_page(request: Request, encoded_symbol: str, tf: str = "4h") -> HT
     # Точность — только для последних 16 свечей (привязка к timestamps графика).
     chart_accuracy = _accuracy_for_plotly(chart_candles, accuracy)
 
+    thr = await _live_thresholds()
+    tick_s = loop.get_last_signal(symbol, tf) or {}
+    sentry, sentry_dir = _sentry_view(tick_s)
+
     return TEMPLATES.TemplateResponse("coin.html", {
+        "sentry": sentry,
+        "sentry_dir": sentry_dir,
         "request": request,
         "session": session,
         "symbol": symbol,
         "encoded": encoded_symbol,
         "tf": tf,
         "tick": tick,
-        "tick_s": loop.get_last_signal(symbol, tf) or {},
+        "tick_s": tick_s,
         "snap": snap,
         "pred": pred,
         "auto_enabled": loop.is_auto(symbol, tf),
-        "entry_threshold": settings.entry_threshold,
-        "strategy_min_adx": settings.strategy_min_adx,
-        "strategy_min_rr": settings.strategy_min_rr,
+        "entry_threshold": thr["entry_threshold"],
+        "strategy_min_adx": thr["strategy_min_adx"],
+        "strategy_min_rr": thr["strategy_min_rr"],
         "accuracy_summary": _accuracy_summary(accuracy),
         "open_positions": open_positions,
         "current_price": (tick.close if tick and tick.close else 0.0),
         "atr": (snap.atr if snap and snap.atr else 0.0),
-        "atr_k_stop": settings.atr_k_stop,
-        "atr_k_take": settings.atr_k_take,
+        "atr_k_stop": thr["atr_k_stop"],
+        "atr_k_take": thr["atr_k_take"],
         # Данные для Plotly (передаём как JSON в шаблон).
         "chart_ohlc": chart_ohlc,
         "chart_pred_close": chart_pred_close,
@@ -254,10 +303,10 @@ async def manual_tick(request: Request, encoded_symbol: str, tf: str = "4h"):
     symbol = _decode_symbol(encoded_symbol)
     loop = get_loop()
     result = await loop.run_once(symbol, tf)
-    import json as j
+    from html import escape
     return HTMLResponse(
-        f'<div class="card"><small>ТИК: S_entry={result.s_entry:.3f} '
-        f'action={result.action} {result.detail}</small></div>'
+        f'<span class="tag">Тик · S_entry {result.s_entry:.3f} · '
+        f'{escape(str(result.action))} {escape(str(result.detail or ""))}</span>'
     )
 
 
@@ -273,16 +322,16 @@ async def toggle_auto(request: Request, encoded_symbol: str, tf: str = "4h"):
     loop = get_loop()
     enabled = not loop.is_auto(symbol, tf)
     loop.set_auto(symbol, tf, enabled)
-    cls = "btn btn-sm auto-btn" + (" btn-success" if enabled else "")
-    state = "ON" if enabled else "OFF"
+    # Тот же HTML, что и макрос ui.auto_switch в шаблонах.
+    cls = "switch auto-btn" + (" is-on" if enabled else "")
+    state = "включена" if enabled else "выключена"
     return HTMLResponse(
-        f'<button type="button" class="{cls}" '
+        f'<button type="button" class="{cls}" role="switch" '
+        f'aria-checked="{"true" if enabled else "false"}" '
         f'data-sym="{symbol}" data-tf="{tf}" '
         f'hx-post="/coin/{encoded_symbol}/auto?tf={tf}" '
         f'hx-target="this" hx-swap="outerHTML" '
-        f'title="Авто-торговля {tf}">'
-        f'{state}'
-        f'</button>'
+        f'title="Авто-торговля {tf}: {state}"></button>'
     )
 
 
@@ -421,8 +470,8 @@ async def manual_open(request: Request, encoded_symbol: str, tf: str = "4h"):
     side_ru = "LONG" if side == "long" else "SHORT"
     color = "var(--green)" if side == "long" else "var(--red)"
     return HTMLResponse(
-        f'<small style="color: {color};">✅ {side_ru} #{position.id} открыт: '
-        f'qty={qty:.6f} @ ${price:.2f}</small>'
+        f'<small style="color: {color};">{side_ru} #{position.id} открыт: '
+        f'{qty:.6f} по {price:.6g}</small>'
     )
 
 
@@ -477,7 +526,7 @@ async def close_position_by_id(request: Request, position_id: int):
         return HTMLResponse('<small style="color: var(--red);">Не удалось закрыть</small>')
     pnl_color = "var(--green)" if closed.net_pnl >= 0 else "var(--red)"
     return HTMLResponse(
-        f'<small style="color: {pnl_color};">✅ Закрыта #{position_id} '
+        f'<small style="color: {pnl_color};">Закрыта #{position_id} '
         f'{closed.exit_reason} PnL=${closed.net_pnl:.4f}</small>'
     )
 
@@ -605,7 +654,7 @@ async def edit_position(request: Request, position_id: int):
                 errors.append("Для LONG стоп должен быть ниже тейка")
 
         if errors:
-            msg = "⚠️ " + "; ".join(errors)
+            msg = "; ".join(errors)
             return HTMLResponse(
                 f'<small style="color: var(--red);">{msg}</small>',
                 status_code=400,
@@ -626,7 +675,7 @@ async def edit_position(request: Request, position_id: int):
         )
 
     return HTMLResponse(
-        f'<small style="color: var(--green);">✓ Обновлено: стоп {stop_str}, '
+        f'<small style="color: var(--green);">Обновлено: стоп {stop_str}, '
         f'тейк {target_str}</small>'
     )
 
@@ -741,6 +790,7 @@ async def live_data(encoded_symbol: str, tf: str = "4h") -> dict:
     цена обновляется с Binance не чаще раза в 15 сек (rate-limit friendly).
     """
     import time
+    from core.market_service import get_market
     symbol = _decode_symbol(encoded_symbol)
     loop = get_loop()
 
@@ -772,9 +822,11 @@ async def live_data(encoded_symbol: str, tf: str = "4h") -> dict:
             if cached:
                 live_price = cached["price"]
 
+    from core.strategy_config import get_threshold
     return {
         "symbol": symbol,
         "price": live_price,
+        "entry_threshold": await get_threshold("entry_threshold"),
         # s_entry/direction/win_prob — ТОЛЬКО из своего ТФ (None если нет данных).
         "s_entry": sig.get("s_entry"),
         "s_entry_short": sig.get("s_entry_short"),
@@ -869,19 +921,14 @@ async def dashboard_signals() -> dict:
             "symbol": coin.symbol,
             "encoded": _encode_symbol(coin.symbol),
             "default_tf": coin.default_tf,
-            "win_prob_4h": s4.get("win_prob"),
-            "pred_return_4h": s4.get("pred_return"),
-            "direction_4h": s4.get("direction", "up"),
-            "updated_4h": s4.get("updated_at"),
-            "win_prob_1h": s1.get("win_prob"),
-            "pred_return_1h": s1.get("pred_return"),
-            "direction_1h": s1.get("direction", "up"),
-            "updated_1h": s1.get("updated_at"),
+            **_coin_tf_fields(s4, "4h"),
+            **_coin_tf_fields(s1, "1h"),
         })
+    from core.strategy_config import get_threshold
     return {
         "coins": items,
         "refreshing": loop.is_refreshing,
-        "entry_threshold": settings.entry_threshold,
+        "entry_threshold": await get_threshold("entry_threshold"),
     }
 
 
@@ -1027,6 +1074,42 @@ async def save_settings(request: Request):
     return RedirectResponse(url=f"/settings?{urlencode(params)}", status_code=303)
 
 
+@router.post("/api/settings/threshold")
+async def save_threshold_api(request: Request):
+    """Автосохранение одного порога со страницы настроек (без перезагрузки).
+
+    Форма: key, value (в формате UI — проценты для percent-полей).
+    Значение сразу попадает в БД, кеш и снапшот стратегии, т.е. действует
+    со следующего тика без перезапуска.
+    Ответ: {ok, key, value, clamped?, entered?} или {ok: false, error}.
+    """
+    from fastapi.responses import JSONResponse
+    from core.strategy_config import THRESHOLD_KEYS, refresh_snapshot, save_thresholds
+
+    form = await request.form()
+    key = str(form.get("key", ""))
+    meta = THRESHOLD_KEYS.get(key)
+    if meta is None:
+        return JSONResponse({"ok": False, "error": "Неизвестный параметр"}, status_code=400)
+    try:
+        value = float(str(form.get("value", "")).replace(",", ".").strip())
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Введите число"}, status_code=400)
+    if value != value or value in (float("inf"), float("-inf")):
+        return JSONResponse({"ok": False, "error": "Введите число"}, status_code=400)
+    if meta.get("type") == "int":
+        value = float(round(value))
+
+    saved, clamped = await save_thresholds({key: value}, form_is_percent=True)
+    await refresh_snapshot()
+
+    out: dict = {"ok": True, "key": key, "value": saved[key]}
+    if key in clamped:
+        out["clamped"] = True
+        out["entered"] = clamped[key][0]
+    return out
+
+
 # ─── Переключение режима paper/live ─────────────────────────
 
 
@@ -1073,11 +1156,11 @@ async def add_wallet(request: Request):
     except WalletValidationError as e:
         # Ошибка валидации — передаём через query param.
         return RedirectResponse(
-            url=f"/settings?wallet_error={str(e)}", status_code=303,
+            url=f"/settings?wallet_error={quote(str(e))}#wallets", status_code=303,
         )
     except Exception as e:
         return RedirectResponse(
-            url=f"/settings?wallet_error={str(e)}", status_code=303,
+            url=f"/settings?wallet_error={quote(str(e))}#wallets", status_code=303,
         )
     return RedirectResponse(url="/settings", status_code=303)
 
@@ -1111,6 +1194,19 @@ async def toggle_live_auto(request: Request):
     val = str(form.get("live_auto", "0"))
     settings.live_auto_enabled = val == "1"
     return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/api/settings/live-auto")
+async def live_auto_api(request: Request) -> dict:
+    """Вкл/выкл авто-торговлю реальными деньгами без перезагрузки страницы.
+
+    Действует сразу (trading_loop читает settings.live_auto_enabled на каждом
+    тике). После перезапуска значение снова берётся из .env (LIVE_AUTO_ENABLED).
+    """
+    form = await request.form()
+    settings.live_auto_enabled = str(form.get("enable", "0")) == "1"
+    logger.info("live_auto_enabled = %s (из UI)", settings.live_auto_enabled)
+    return {"ok": True, "enabled": settings.live_auto_enabled}
 
 
 # ─── Вспомогательные для Plotly ──────────────────────────────

@@ -57,6 +57,23 @@ class MarketService:
         дефолтный async-DNS (aiodns/pycares) ломается с ClientConnectorDNSError.
         См. core/http_client.py.
         """
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._exchange is not None:
+            ex_loop = getattr(self._exchange, "asyncio_loop", None) or getattr(getattr(self._exchange, "throttler", None), "loop", None)
+            if ex_loop is not None and (ex_loop.is_closed() or (current_loop and ex_loop is not current_loop)):
+                self._exchange = None
+                self._session = None
+
+        if self._session is not None:
+            sess_loop = getattr(self._session, "_loop", None)
+            if self._session.closed or (sess_loop is not None and (sess_loop.is_closed() or (current_loop and sess_loop is not current_loop))):
+                self._session = None
+                self._exchange = None
+
         if self._exchange is None:
             # Ленивый импорт, чтобы модуль импортировался без сети.
             from core.http_client import make_aiohttp_session
@@ -159,6 +176,31 @@ class MarketService:
             len(candles), symbol, timeframe, total,
         )
         return candles
+
+    async def is_active(self, symbol: str) -> bool | None:
+        """Торгуется ли пара на бирже прямо сейчас.
+
+        Возвращает False, если биржа пометила рынок неактивным (у Binance это
+        status=BREAK/HALT: торги остановлены, новых свечей нет), True — если
+        активен, None — если статус неизвестен (пары нет в списке рынков).
+
+        Статус берётся из load_markets() (кеш CCXT на время жизни соединения),
+        отдельного сетевого запроса не делает.
+        """
+        ex = await self._ex()
+        market = (ex.markets or {}).get(symbol)
+        if market is None:
+            return None
+        active = market.get("active")
+        return None if active is None else bool(active)
+
+    async def ping(self) -> None:
+        """Проверка связи с биржей: лёгкий запрос серверного времени.
+
+        Бросает исключение, если биржа недоступна (нет интернета, DNS, таймаут).
+        """
+        ex = await self._ex()
+        await ex.fetch_time()
 
     async def fetch_ticker(self, symbol: str) -> dict[str, float]:
         """Последний тикер (цена, bid/ask, объём 24ч)."""

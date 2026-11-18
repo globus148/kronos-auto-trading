@@ -1,62 +1,90 @@
+{% import "_ui.html" as ui %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Auto-Trading</title>
+    <title>{% block title %}Kronos{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/main.css?v=3">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="/static/js/kronos.js?v=3"></script>
 </head>
-<body>
-    <nav class="navbar">
-        <a href="/" class="logo">⚡ Kronos Trading</a>
-        <div class="nav-links">
+{% set path = request.url.path %}
+<body class="{% if session and session.mode.value == 'live' %}is-live{% endif %}">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M6 3h12M6 21h12"/><path d="M7 3c0 5 10 6 10 18M17 3c0 5-10 6-10 18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H5v16h5"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5L2.5 20h19L12 3.5z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+</svg>
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <a href="/dashboard" class="brand">
+            <span class="brand-mark">{{ ui.icon('logo') }}</span>
+            Kronos
+        </a>
+        <nav class="nav">
+            <a href="/dashboard" class="{% if path == '/dashboard' or path.startswith('/coin/') %}active{% endif %}">Дашборд</a>
             {% if session %}
-            <!-- Переключатель режима Paper / Live -->
-            <div class="mode-switcher">
-                <button type="button" class="btn btn-xs {% if session.mode.value == 'paper' %}btn-success{% else %}mode-inactive{% endif %}"
-                        id="mode-paper" title="Тестовый режим (виртуальные деньги)">📝 Paper</button>
-                <button type="button" class="btn btn-xs {% if session.mode.value == 'live' %}btn-danger{% else %}mode-inactive{% endif %}"
-                        id="mode-live" title="Реальный режим (настоящие деньги)">💰 Live</button>
-            </div>
-            <a href="/">Дашборд</a>
-            <a href="/analytics">Аналитика</a>
-            <a href="/settings">Настройки</a>
-            <span class="badge {% if session.mode.value == 'live' %}badge-live{% endif %}">Режим: {{ session.mode.value }}</span>
-            <a href="/logout" class="nav-logout" title="Выйти">⏻</a>
-            {% else %}
-            <a href="/">Дашборд</a>
+            <a href="/analytics" class="{% if path == '/analytics' %}active{% endif %}">Аналитика</a>
+            <a href="/settings" class="{% if path == '/settings' %}active{% endif %}">Настройки</a>
             {% endif %}
+        </nav>
+        {% if session %}
+        <div class="topbar-right">
+            <div class="seg" id="mode-switch" role="tablist" aria-label="Режим торговли">
+                <button type="button" data-mode="paper"
+                        class="{% if session.mode.value == 'paper' %}active is-paper{% endif %}"
+                        title="Тестовый режим: виртуальные деньги">Paper</button>
+                <button type="button" data-mode="live"
+                        class="{% if session.mode.value == 'live' %}active is-live{% endif %}"
+                        title="Реальный режим: настоящие деньги на бирже">Live</button>
+            </div>
+            <a href="/logout" class="icon-btn danger" title="Выйти">{{ ui.icon('logout') }}</a>
         </div>
-    </nav>
+        {% endif %}
+    </div>
+</header>
 
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
 
-    {% block scripts %}{% endblock %}
+<div class="toasts" id="toasts"></div>
 
-    <script>
-    // Переключатель режима Paper ↔ Live (HTMX POST /api/mode).
-    (function() {
-        function switchMode(newMode) {
-            var fd = new FormData();
-            fd.append('mode', newMode);
-            fetch('/api/mode', { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.mode) {
-                        location.reload();
-                    }
-                });
-        }
-        var paperBtn = document.getElementById('mode-paper');
-        var liveBtn = document.getElementById('mode-live');
-        if (paperBtn) paperBtn.addEventListener('click', function() { switchMode('paper'); });
-        if (liveBtn) liveBtn.addEventListener('click', function() { switchMode('live'); });
-    })();
-    </script>
+<div class="modal-overlay" id="confirm-modal">
+    <div class="modal" style="max-width: 400px;">
+        <div class="modal-head">
+            <h2 id="confirm-title">Подтверждение</h2>
+        </div>
+        <div class="modal-body">
+            <div id="confirm-text" class="muted" style="font-size: 13.5px;"></div>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn" data-confirm="cancel">Отмена</button>
+            <button type="button" class="btn btn-primary" data-confirm="ok" id="confirm-ok">Подтвердить</button>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

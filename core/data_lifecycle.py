@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from core.market_service import Candle, get_market
+from core.timeutil import ms_to_utc_str
 from db.models import Candle as CandleRow, Coin
 
 logger = logging.getLogger("trading.data")
@@ -36,7 +37,10 @@ class UpdateReport:
     """Отчёт об одном обновлении пары/ТФ (для логов и UI)."""
     symbol: str
     timeframe: str
-    action: str            # "cold_start" | "incremental" | "full_refresh" | "ok"
+    # "cold_start" | "incremental" | "full_refresh" | "ok"
+    # "inactive" — пара остановлена на бирже, сеть не трогаем
+    # "stale"    — биржа не отдала ничего новее того, что уже есть в БД
+    action: str
     fetched: int           # сколько скачано
     inserted: int          # сколько реально вставлено
     pruned: int            # сколько удалено (pruning)
@@ -48,6 +52,9 @@ class DataLifecycleManager:
 
     def __init__(self) -> None:
         self._lock_per_pair: dict[str, asyncio.Lock] = {}
+        # Пары, по которым уже выведено предупреждение «остановлена на бирже»
+        # (чтобы не повторять его каждые 15 минут).
+        self._inactive_warned: set[str] = set()
 
     def _pair_lock(self, coin_id: int, tf: str) -> asyncio.Lock:
         key = f"{coin_id}:{tf}"
@@ -81,6 +88,25 @@ class DataLifecycleManager:
         last_ts = await self._last_timestamp(session, coin.id, timeframe)
         count = await self._count(session, coin.id, timeframe)
 
+        # Пара остановлена на бирже (напр. Binance status=BREAK): новых свечей
+        # нет и не будет. Не качаем историю и не трогаем то, что уже лежит в БД —
+        # раньше такая пара на каждом прогоне либо получала 0 свечей, либо
+        # целиком удалялась и перекачивалась заново.
+        if await self._is_inactive(symbol):
+            if symbol not in self._inactive_warned:
+                self._inactive_warned.add(symbol)
+                logger.warning(
+                    "%s остановлена на бирже %s (рынок неактивен) — данные не "
+                    "обновляются, пара пропускается. Последняя свеча в БД: %s",
+                    symbol, settings.exchange,
+                    ms_to_utc_str(last_ts) + " UTC" if last_ts else "нет",
+                )
+            return UpdateReport(
+                symbol=symbol, timeframe=timeframe, action="inactive",
+                fetched=0, inserted=0, pruned=0, final_count=count,
+            )
+        self._inactive_warned.discard(symbol)
+
         if last_ts is None or count < required * 0.5:
             # ── 6.2 COLD START: данных нет или критически мало ──
             report = await self._cold_start(session, coin, timeframe, required)
@@ -90,22 +116,41 @@ class DataLifecycleManager:
             if gap_bars <= GAP_TOLERANCE:
                 # ── 6.3 OK: данных достаточно, отставание в норме ──
                 # Просто incremental: докачать 1-2 последние свечи.
+                # since=last_ts (а не +1): последняя сохранённая свеча могла быть
+                # записана незакрытой — перекачиваем её, upsert обновит OHLCV.
                 report = await self._incremental(
-                    session, coin, timeframe, since=last_ts + 1, expected=2
+                    session, coin, timeframe, since=last_ts, expected=3
                 )
                 report.action = "ok"
             elif count >= required:
                 # ── 6.3 INCREMENTAL: глубина ок, но отстали по свежесте ──
                 report = await self._incremental(
                     session, coin, timeframe,
-                    since=last_ts + 1, expected=int(gap_bars) + 2,
+                    since=last_ts, expected=int(gap_bars) + 3,
                 )
             else:
                 # ── 6.3 FULL REFRESH: большая дыра или фрагментация ──
                 # Политика: «лучше свежие и ровные, чем старые с дырами».
-                await self._delete_all(session, coin.id, timeframe)
-                report = await self._cold_start(session, coin, timeframe, required)
-                report.action = "full_refresh"
+                # Сначала качаем, и только если биржа отдала что-то новее —
+                # заменяем старое (иначе удалили бы данные ради тех же данных).
+                candles = await get_market().fetch_ohlcv_history(
+                    symbol, timeframe, required
+                )
+                if not candles or candles[-1].timestamp <= last_ts:
+                    report = UpdateReport(
+                        symbol=symbol, timeframe=timeframe, action="stale",
+                        fetched=len(candles), inserted=0, pruned=0, final_count=0,
+                    )
+                else:
+                    await self._delete_all(session, coin.id, timeframe)
+                    inserted = await self._bulk_upsert(
+                        session, coin.id, timeframe, candles
+                    )
+                    report = UpdateReport(
+                        symbol=symbol, timeframe=timeframe, action="full_refresh",
+                        fetched=len(candles), inserted=inserted, pruned=0,
+                        final_count=0,
+                    )
 
         # 6.4 — всегда pruning после любого обновления.
         report.pruned = await self.prune(session, coin.id, timeframe)
@@ -118,6 +163,15 @@ class DataLifecycleManager:
             report.inserted, report.pruned, report.final_count,
         )
         return report
+
+    async def _is_inactive(self, symbol: str) -> bool:
+        """True, только если биржа явно сообщает, что рынок неактивен."""
+        try:
+            return (await get_market().is_active(symbol)) is False
+        except Exception as exc:
+            # Статус не удалось узнать (нет сети и т.п.) — ведём себя как раньше.
+            logger.debug("Статус рынка %s недоступен: %s", symbol, exc)
+            return False
 
     # ─── 6.2: Cold start ─────────────────────────────────────
 
@@ -243,7 +297,12 @@ class DataLifecycleManager:
     async def _bulk_upsert(
         self, session: AsyncSession, coin_id: int, tf: str, candles: list[Candle],
     ) -> int:
-        """Вставка с игнорированием дубликатов (ON CONFLICT DO NOTHING)."""
+        """Upsert свечей: новые вставляются, существующие ОБНОВЛЯЮТСЯ.
+
+        Раньше было ON CONFLICT DO NOTHING — незакрытая свеча, записанная на
+        1-й минуте, навсегда оставалась «огрызком» (open≈close, объём ~0.2%
+        от нормы), что ломало ATR/ADX/RSI и вход Kronos.
+        """
         if not candles:
             return 0
         rows = [
@@ -255,8 +314,15 @@ class DataLifecycleManager:
             for c in candles
         ]
         stmt = sqlite_insert(CandleRow).values(rows)
-        stmt = stmt.on_conflict_do_nothing(
-            index_elements=["coin_id", "tf", "timestamp"]
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["coin_id", "tf", "timestamp"],
+            set_={
+                "open": stmt.excluded.open,
+                "high": stmt.excluded.high,
+                "low": stmt.excluded.low,
+                "close": stmt.excluded.close,
+                "volume": stmt.excluded.volume,
+            },
         )
         result = await session.execute(stmt)
         return result.rowcount or 0

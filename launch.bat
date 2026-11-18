@@ -13,14 +13,18 @@ echo   Kronos Auto-Trading
 echo ============================================================
 echo.
 
-REM Проверяем Python.
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [ОШИБКА] Python не найден в PATH.
-    echo Установите Python 3.11+ и добавьте в PATH.
-    pause
-    exit /b 1
+REM Выбираем Python: сначала окружение проекта venv, иначе системный.
+set "PY=%~dp0venv\Scripts\python.exe"
+if not exist "%PY%" (
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo [ОШИБКА] Python не найден: нет venv\Scripts\python.exe и python в PATH.
+        pause
+        exit /b 1
+    )
+    set "PY=python"
 )
+echo [INFO] Python: %PY%
 
 REM Создаём папку для БД, если её нет.
 if not exist "data" mkdir data
@@ -34,10 +38,10 @@ if not exist ".env" (
 )
 
 REM Проверяем fastapi (индикатор что зависимости установлены).
-python -c "import fastapi" >nul 2>&1
+"%PY%" -c "import fastapi" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Устанавливаю зависимости из requirements.txt...
-    python -m pip install -r requirements.txt
+    "%PY%" -m pip install -r requirements.txt
     if errorlevel 1 (
         echo [ОШИБКА] Не удалось установить зависимости.
         pause
@@ -53,6 +57,6 @@ echo ------------------------------------------------------------
 echo.
 
 REM Запускаем сервер.
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+"%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 pause

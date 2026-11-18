@@ -17,8 +17,12 @@
 ### Способ 2 — один клик (Git Bash / Linux / Mac)
 
 ```bash
-./launch.sh
+./scripts/launch.sh
 ```
+
+### Доступ с телефона (Windows + ngrok)
+
+Двойной клик по **`scripts/tunnel.bat`**: запускает сервер и ngrok-туннель. Пароль входа — `APP_PASSWORD` из `.env`.
 
 ### Способ 3 — вручную
 
@@ -155,7 +159,7 @@ Fixed-Fractional + ATR: риск 1% капитала на сделку, стоп
 ## 🧪 Тесты
 
 ```bash
-# Все тесты (67 шт.)
+# Все тесты (155 шт.)
 python -m pytest tests/ -v
 
 # Только индикаторы
@@ -170,36 +174,46 @@ python -m pytest tests/test_strategy.py -v
 ## 📁 Структура проекта
 
 ```
-ZCodeProject/
-├── launch.bat, launch.sh         # Удобный запуск (один клик)
-├── plan.md                       # Полная архитектура (рус.)
-├── requirements.txt, .env.example, config.py
+kronos/
+├── launch.bat                    # Запуск в один клик (Windows)
+├── config.py                     # Настройки из .env (pydantic-settings)
+├── requirements.txt, .env.example, pytest.ini, conftest.py
 │
 ├── app/                          # Веб-слой (FastAPI)
-│   ├── main.py                   # Точка входа, lifespan
-│   ├── routes/ui.py             # Роуты: дашборд, монета, аналитика
-│   ├── templates/               # Jinja2: dashboard, coin, analytics, settings
-│   └── static/css/main.css      # Тёмная тема
+│   ├── main.py                   # Точка входа, lifespan, фильтры шаблонов
+│   ├── auth/                     # Пароль на вход (cookie-сессия)
+│   ├── routes/                   # auth.py — вход/выход; ui.py — страницы и API
+│   ├── templates/                # Jinja2: dashboard, coin, analytics, settings, login
+│   │   └── _*.html               # Общие макросы и модальные окна
+│   └── static/                   # css/, js/kronos.js, favicon.svg
 │
 ├── core/                         # Бизнес-логика
-│   ├── market_service.py        # CCXT → Binance (async)
-│   ├── data_lifecycle.py        # cold/warm start, pruning (план 6)
-│   ├── prediction_service.py    # Kronos + кэш прогнозов
-│   ├── indicators.py            # RSI/MACD/EMA/ATR/BB/ADX (pandas)
-│   ├── strategy_engine.py       # S_entry/S_exit (план 4.3–4.4)
-│   ├── risk_manager.py          # Fixed-Fractional + ATR
-│   ├── portfolio_engine.py      # Сделки, комиссии, equity, аналитика
-│   └── trading_loop.py          # APScheduler оркестратор
+│   ├── market_service.py         # CCXT → Binance (async)
+│   ├── http_client.py            # aiohttp-сессии (прокси, таймауты)
+│   ├── network_guard.py          # Пауза торговли при обрыве сети
+│   ├── data_lifecycle.py         # Свечи: cold/warm start, pruning
+│   ├── prediction_service.py     # Kronos + кэш прогнозов
+│   ├── indicators.py             # RSI/MACD/EMA/ATR/BB/ADX (pandas)
+│   ├── news_service.py           # Сентимент новостей (LLM + поиск)
+│   ├── strategy_engine.py        # S_entry/S_exit
+│   ├── strategy_config.py        # Пороги, редактируемые на лету (/settings)
+│   ├── risk_manager.py           # Fixed-Fractional + ATR
+│   ├── portfolio_engine.py       # Сделки, комиссии, equity, аналитика
+│   ├── wallet_service.py         # API-ключи бирж (шифрование Fernet)
+│   ├── mode_manager.py           # Режим paper / live
+│   ├── trading_loop.py           # APScheduler-оркестратор
+│   ├── logging_service.py        # trading.log, trades.log, signals.csv
+│   └── timeutil.py               # Единое UTC-время
 │
-├── db/                           # SQLAlchemy
-│   ├── models.py                # 9 таблиц + enum'ы
-│   └── database.py              # async engine + seed монет
-│
+├── db/                           # SQLAlchemy: models.py, database.py
 ├── kronos/                       # ML-ядро (vendored из Kronos repo)
-│   ├── kronos.py, module.py
+├── tests/                        # pytest, 155 тестов
+├── scripts/                      # launch.sh (Linux/Mac/Git Bash), tunnel.bat (ngrok)
+├── docs/                         # plan.md — архитектура и математика
 │
-├── tests/                        # 67 unit-тестов
-└── data/                         # SQLite БД (создаётся автоматически)
+├── data/                         # SQLite БД (не в git)
+├── logs/                         # Логи (не в git)
+└── _archive/                     # Старые копии и бэкапы (не в git)
 ```
 
 ---
@@ -273,4 +287,4 @@ ZCodeProject/
 
 ## 📖 Подробнее
 
-Полная архитектура и математика — в **`plan.md`** (на русском, 11 разделов).
+Полная архитектура и математика — в **`docs/plan.md`** (на русском, 11 разделов).

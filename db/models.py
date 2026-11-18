@@ -29,6 +29,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from core.timeutil import utcnow
+
 
 class Base(DeclarativeBase):
     """Базовый класс всех моделей."""
@@ -66,6 +68,9 @@ class TradeReason(str, Enum):
     stop_loss = "stop_loss"
     signal_reversal = "signal_reversal"
     time_stop = "time_stop"
+    # Принудительное закрытие при остановке приложения (или при старте после
+    # аварийной остановки) — позиции не переживают выход.
+    shutdown = "shutdown"
 
 
 # ─── Монеты ───────────────────────────────────────────────────
@@ -117,7 +122,7 @@ class Session(Base):
     mode: Mapped[SessionMode] = mapped_column(default=SessionMode.paper)
     initial_balance: Mapped[float] = mapped_column(Float, default=100.0)
     cash: Mapped[float] = mapped_column(Float, default=100.0)        # свободный USDT
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_active: Mapped[bool] = mapped_column(default=True)
 
     positions: Mapped[list[Position]] = relationship(back_populates="session")
@@ -137,7 +142,7 @@ class Position(Base):
     side: Mapped[PositionSide] = mapped_column(default=PositionSide.long)
     qty: Mapped[float] = mapped_column(Float)
     entry_price: Mapped[float] = mapped_column(Float)
-    entry_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    entry_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     stop_price: Mapped[float] = mapped_column(Float)
     target_price: Mapped[float] = mapped_column(Float)
     # Текущий trailing-stop (обновляется по мере роста цены, план 4.4.2).
@@ -171,7 +176,7 @@ class Trade(Base):
     slippage: Mapped[float] = mapped_column(Float, default=0.0)
     pnl: Mapped[float] = mapped_column(Float, default=0.0)
     reason: Mapped[TradeReason] = mapped_column(default=TradeReason.manual)
-    executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    executed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     position: Mapped[Position] = relationship(back_populates="trades")
 
@@ -184,7 +189,7 @@ class EquityPoint(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("session.id"), index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     equity: Mapped[float] = mapped_column(Float)            # cash + позиции по рынку
     cash: Mapped[float] = mapped_column(Float)
     positions_value: Mapped[float] = mapped_column(Float)
@@ -201,7 +206,7 @@ class Prediction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     coin_id: Mapped[int] = mapped_column(ForeignKey("coin.id"), index=True)
     tf: Mapped[str] = mapped_column(String(5), index=True)
-    predicted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    predicted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     horizon: Mapped[int] = mapped_column(Integer)            # N свечей вперёд
     payload_json: Mapped[str] = mapped_column(Text)          # OHLCV прогноза
     actual_return: Mapped[float | None] = mapped_column(Float, nullable=True)  # для точности
@@ -260,9 +265,9 @@ class Wallet(Base):
     # Зашифрованный Fernet-токен api_secret (не хранится в открытом виде).
     api_secret_enc: Mapped[str] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -283,5 +288,5 @@ class AutoConfig(Base):
     pair: Mapped[str] = mapped_column(String(30), unique=True, index=True)  # "BTC/USDT:4h"
     enabled: Mapped[bool] = mapped_column(default=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )

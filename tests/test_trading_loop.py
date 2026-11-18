@@ -23,15 +23,17 @@ from sqlalchemy import select, text
 
 @pytest.fixture
 async def setup_db():
-    """Чистая БД + монета BTC/USDT."""
+    """Чистая БД сессий/сделок + монета BTC/USDT (свечи сохраняются между тестами)."""
     await init_db()
     async with engine.begin() as conn:
-        for t in ["equity_point", "trade", "position", "session", "coin", "candle"]:
+        for t in ["equity_point", "trade", "position", "session"]:
             await conn.execute(text(f"DELETE FROM {t}"))
     async with get_session() as db:
-        coin = Coin(symbol="BTC/USDT", enabled=True, default_tf="4h")
-        db.add(coin)
-        await db.commit()
+        coin = (await db.execute(select(Coin).where(Coin.symbol == "BTC/USDT"))).scalar_one_or_none()
+        if not coin:
+            coin = Coin(symbol="BTC/USDT", enabled=True, default_tf="4h")
+            db.add(coin)
+            await db.commit()
     yield
     # cleanup в конце модуля.
 
@@ -51,7 +53,7 @@ class TestRunOnce:
     async def test_run_once_returns_tick_result(self, setup_db):
         """run_once возвращает корректный TickResult на реальных данных."""
         try:
-            loop = get_loop()
+            loop = TradingLoop()
             result = await loop.run_once("BTC/USDT", "4h")
             assert result.symbol == "BTC/USDT"
             assert result.timeframe == "4h"
@@ -65,7 +67,7 @@ class TestRunOnce:
     async def test_auto_disabled_means_no_open(self, setup_db):
         """Без авто-режима — позиция не открывается даже при высоком S_entry."""
         try:
-            loop = get_loop()
+            loop = TradingLoop()
             loop.set_auto("BTC/USDT", "4h", False)  # авто ВЫКЛ
             await loop.run_once("BTC/USDT", "4h")
             async with get_session() as db:
@@ -74,26 +76,30 @@ class TestRunOnce:
                 positions = await pe.get_open_positions(db, session)
                 assert len(positions) == 0  # не открылось
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             pytest.skip(f"Сеть недоступен: {e}")
 
     @pytest.mark.asyncio
     async def test_hold_when_signal_below_threshold(self, setup_db):
         """При S_entry < entry_threshold action != 'opened'."""
         try:
-            loop = get_loop()
+            loop = TradingLoop()
             loop.set_auto("BTC/USDT", "4h", True)
             result = await loop.run_once("BTC/USDT", "4h")
             if result.s_entry < settings.entry_threshold:
                 assert result.action != "opened"
                 print(f"\n  S_entry={result.s_entry:.3f} < {settings.entry_threshold} → hold (верно)")
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             pytest.skip(f"Сеть недоступен: {e}")
 
     @pytest.mark.asyncio
     async def test_equity_recorded(self, setup_db):
         """После тика в БД есть equity_point."""
         try:
-            loop = get_loop()
+            loop = TradingLoop()
             await loop.run_once("BTC/USDT", "4h")
             async with get_session() as db:
                 from db.models import EquityPoint
@@ -103,4 +109,6 @@ class TestRunOnce:
                 )).scalar_one()
                 assert count >= 1  # equity записан
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             pytest.skip(f"Сеть недоступен: {e}")

@@ -130,14 +130,12 @@ class RiskManager:
             stop_distance = entry_price * stop_pct
             stop_price = entry_price - stop_distance
 
-        # 3. Тейк-профит: лучший из прогноза или ATR-таргета.
-        # Если прогноз близко к entry → rr_ratio < 1 и сделка падает с ValueError.
-        # Берём максимум: прогноз (если выгоднее) ИЛИ ATR-таргет (гарантирует R/R).
+        # 3. Тейк-профит: прогноз (с дисконтом 10%) если он обеспечивает R/R >= 1.0,
+        # иначе fallback на ATR-таргет.
         target_distance_atr = self.atr_k_take * atr
         if target_from_prediction and target_from_prediction > entry_price:
             pred_target = entry_price + (target_from_prediction - entry_price) * 0.9
-            # Прогноз выгоднее ATR — берём его, иначе fallback на ATR.
-            if (pred_target - entry_price) >= target_distance_atr:
+            if (pred_target - entry_price) >= stop_distance:
                 target_price = pred_target
             else:
                 target_price = entry_price + target_distance_atr
@@ -214,12 +212,12 @@ class RiskManager:
             stop_distance = entry_price * stop_pct
             stop_price = entry_price + stop_distance
 
-        # 3. Тейк-профит: лучший из прогноза или ATR-таргета (зеркально к LONG).
+        # 3. Тейк-профит: прогноз (с дисконтом 10%) если он обеспечивает R/R >= 1.0,
+        # иначе fallback на ATR-таргет (зеркально к LONG).
         target_distance_atr = self.atr_k_take * atr
         if target_from_prediction and target_from_prediction < entry_price:
             pred_target = entry_price - (entry_price - target_from_prediction) * 0.9
-            # Прогноз выгоднее ATR — берём его, иначе fallback на ATR.
-            if (entry_price - pred_target) >= target_distance_atr:
+            if (entry_price - pred_target) >= stop_distance:
                 target_price = pred_target
             else:
                 target_price = entry_price - target_distance_atr

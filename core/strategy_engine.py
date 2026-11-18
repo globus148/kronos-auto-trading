@@ -79,8 +79,12 @@ class StrategyEngine:
         subs_short = self._sub_signals_short(
             snap, kronos_pred_return, kronos_pred_slope, news_sentiment,
         )
-        s_entry = self._composite_signal(subs)
-        s_entry_short = self._composite_signal(subs_short)  # веса те же, значения зеркальные
+        # Веса выбираем по НАЛИЧИЮ прогноза, а не по f_kronos > 0: иначе
+        # медвежий прогноз (f_kronos=0 для long) выключал Kronos из формулы
+        # и long-скор становился ВЫШЕ, чем при слабом бычьем прогнозе.
+        has_kronos = kronos_pred_return is not None and kronos_pred_slope is not None
+        s_entry = self._composite_signal(subs, has_kronos)
+        s_entry_short = self._composite_signal(subs_short, has_kronos)  # веса те же, значения зеркальные
         s_exit = self._composite_exit_signal(snap, kronos_pred_return, kronos_pred_slope)
 
         return SignalResult(
@@ -535,10 +539,13 @@ class StrategyEngine:
 
         return signals
 
-    def _composite_signal(self, subs: dict[str, float]) -> float:
+    def _composite_signal(
+        self, subs: dict[str, float], has_kronos: bool | None = None,
+    ) -> float:
         """Взвешенная сумма суб-сигналов (план 4.3)."""
-        # Если Kronos подключён — его вес 0.30; если нет — перераспределяем.
-        has_kronos = subs.get("f_kronos", 0) > 0
+        # Если Kronos подключён — его вес 0.27; если нет — перераспределяем.
+        if has_kronos is None:  # обратная совместимость (старые вызовы/тесты)
+            has_kronos = subs.get("f_kronos", 0) > 0
         if has_kronos:
             weights = {
                 "f_trend": 0.23, "f_kronos": 0.27, "f_momentum": 0.18,
